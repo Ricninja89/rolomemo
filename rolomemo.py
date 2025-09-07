@@ -245,22 +245,22 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     <script src="{babel}"></script>
     <link rel="stylesheet" href="{tailwind}">
     <style>
-        .line-clamp-3 {
+        .line-clamp-3 {{
             display: -webkit-box;
             -webkit-line-clamp: 3;
             -webkit-box-orient: vertical;
             overflow: hidden;
-        }
-        
+        }}
+
         /* Personalizzazioni tema */
-        :root {
+        :root {{
             --color-cream: #fff7ea;
             --color-avocado: #7a8f3c;
             --color-burnt: #c1542a;
             --color-ink: #1d1d1f;
             --color-smoke: #3b3b40;
             --color-mustard: #d6a516;
-        }
+        }}
     </style>
 </head>
 <body>
