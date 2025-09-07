@@ -23,7 +23,15 @@ except ImportError:
 
 from pathlib import Path  # se non c'è già
 
-BASE_DIR = Path(__file__).resolve().parent
+
+def resource_path(relative: str) -> Path:
+    """Restituisce il percorso reale di una risorsa.
+    Gestisce sia l'esecuzione da sorgente sia da PyInstaller (sys._MEIPASS)."""
+    base = getattr(sys, "_MEIPASS", Path(__file__).resolve().parent)
+    return Path(base) / relative
+
+
+BASE_DIR = resource_path("")
 DIST_DIR = BASE_DIR / "dist"
 INDEX_HTML = DIST_DIR / "index.html"
 
@@ -232,10 +240,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>RoloMemo</title>
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="{react}"></script>
+    <script src="{react_dom}"></script>
+    <script src="{babel}"></script>
+    <link rel="stylesheet" href="{tailwind}">
     <style>
         .line-clamp-3 {
             display: -webkit-box;
@@ -282,7 +290,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 def get_react_component():
     """Legge il componente React dal file o usa quello embedded.
        Cerca sia 'rolomemo_component.js' (underscore) sia 'rolomemo-component.js' (trattino)."""
-    base = Path(__file__).parent
+    base = resource_path("")
     candidates = [
         base / "rolomemo_component.js",
         base / "rolomemo-component.js",
@@ -312,8 +320,15 @@ def get_react_component():
 
 def create_html():
     """Crea l'HTML finale con il componente React"""
+    assets = {
+        "react": resource_path("assets/react.production.min.js").as_uri(),
+        "react_dom": resource_path("assets/react-dom.production.min.js").as_uri(),
+        "babel": resource_path("assets/babel-standalone.min.js").as_uri(),
+        "tailwind": resource_path("assets/tailwind.css").as_uri(),
+    }
     react_component = get_react_component()
-    return HTML_TEMPLATE.replace('// REACT_COMPONENT_PLACEHOLDER', react_component)
+    html = HTML_TEMPLATE.format(**assets)
+    return html.replace('// REACT_COMPONENT_PLACEHOLDER', react_component)
 
 # ========== APPLICAZIONE PRINCIPALE ==========
 
