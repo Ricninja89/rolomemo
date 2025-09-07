@@ -1,2 +1,2 @@
 # requirements.txt
-pywebview>=4.0.0
+pywebview[gtk]>=4.0.0
