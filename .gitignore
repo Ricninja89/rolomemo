@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+.env
+
+# Build / dist
+build/
+dist/
+*.spec
+
+# Logs / cache
+*.log
+*.cache/
+.cache/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Node (se in futuro userai bundler)
+node_modules/
