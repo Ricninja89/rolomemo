@@ -1,4 +1,4 @@
-# build_installer.py
+# Build_installer.py
 import os
 import sys
 import subprocess
@@ -7,7 +7,7 @@ from pathlib import Path
 
 PROJECT_DIR = Path(__file__).parent.resolve()
 DIST_DIR = PROJECT_DIR / "dist"
-BUILD_DIR = PROJECT_DIR / "build"
+Build_DIR = PROJECT_DIR / "Build"
 
 # Toggle onefile via env var (default: onedir perché più semplice per asset/js)
 ONEFILE = os.environ.get("ROLOMEMO_ONEFILE", "").strip() in ("1", "true", "yes")
@@ -25,8 +25,8 @@ def add_data_arg(src: Path, dest: str = ".") -> list[str]:
     return ["--add-data", f"{src}{sep}{dest}"]
 
 def main():
-    # Pulizia build precedente
-    for p in (BUILD_DIR, DIST_DIR):
+    # Pulizia Build precedente
+    for p in (Build_DIR, DIST_DIR):
         if p.exists():
             shutil.rmtree(p)
 
@@ -89,15 +89,15 @@ def main():
     if ONEFILE:
         exe = next(DIST_DIR.glob("RoloMemo*"), None)
         if exe:
-            print(f"\n✅ Build ONE-FILE OK: {exe}")
+            print(f"\nBuild ONE-FILE OK: {exe}")
         else:
-            print("\n❌ Nessun eseguibile trovato in dist/")
+            print("\nNessun eseguibile trovato in dist/")
     else:
         app_dir = DIST_DIR / "RoloMemo"
         if app_dir.exists():
-            print(f"\n✅ Build ONE-DIR OK: {app_dir}")
+            print(f"\nBuild ONE-DIR OK: {app_dir}")
         else:
-            print("\n❌ Nessuna cartella app trovata in dist/")
+            print("\nNessuna cartella app trovata in dist/")
 
     # Nota importante per PyInstaller ONE-FILE:
     # Se più avanti vorrai usare --onefile, assicurati che il codice che legge
@@ -105,3 +105,12 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
+
+
+
+
+
+

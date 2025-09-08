@@ -19,25 +19,64 @@ const TOKENS = {
    Persistenza (pywebview + fallback localStorage)
    =========================== */
 const STORAGE_KEY = "rolomemo.payload.v1";
+
+function withTimestamp(payload) {
+  try {
+    return { ...payload, updatedAt: Date.now() };
+  } catch (_) {
+    return payload;
+  }
+}
+
+function waitForPywebviewApi(timeout = 2000) {
+  return new Promise(resolve => {
+    if (window?.pywebview?.api) return resolve(true);
+    let done = false;
+    const cleanup = () => {
+      done = true;
+      try { window.removeEventListener('pywebviewready', onReady); } catch (_) {}
+      clearInterval(intv);
+      clearTimeout(to);
+    };
+    const onReady = () => { if (!done) { cleanup(); resolve(true); } };
+    try { window.addEventListener('pywebviewready', onReady, { once: true }); } catch (_) {}
+    const intv = setInterval(() => {
+      if (window?.pywebview?.api) { cleanup(); resolve(true); }
+    }, 50);
+    const to = setTimeout(() => { cleanup(); resolve(!!(window?.pywebview?.api)); }, timeout);
+  });
+}
 async function persistLoad() {
   try {
+    let fileData = null;
+    // Attendi che l'API pywebview sia pronta prima di decidere il fallback
+    try { await waitForPywebviewApi(2000); } catch (_) {}
     if (window?.pywebview?.api?.load) {
-      const data = await window.pywebview.api.load();
-      return data || null;
+      try { fileData = await window.pywebview.api.load(); } catch (_) { fileData = null; }
     }
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : null;
+    const raw = (() => { try { return localStorage.getItem(STORAGE_KEY); } catch (_) { return null } })();
+    const localData = raw ? JSON.parse(raw) : null;
+    const fileTs = fileData && typeof fileData.updatedAt === 'number' ? fileData.updatedAt : 0;
+    const localTs = localData && typeof localData.updatedAt === 'number' ? localData.updatedAt : 0;
+    const chosen = fileTs >= localTs ? (fileData || localData) : (localData || fileData);
+    // Se local è più recente, prova a sincronizzare su file
+    if (chosen === localData && localTs > fileTs && window?.pywebview?.api?.save) {
+      try { await window.pywebview.api.save(localData); } catch (_) {}
+    }
+    return chosen || null;
   } catch (e) {
     console.warn("persistLoad", e);
     return null;
   }
 }
 async function persistSave(payload) {
+  const data = withTimestamp(payload);
   try {
+    // Aggiorna sempre localStorage per durabilità in chiusura
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch (_) {}
     if (window?.pywebview?.api?.save) {
-      return await window.pywebview.api.save(payload);
+      return await window.pywebview.api.save(data);
     }
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
     return { ok: true, local: true };
   } catch (e) {
     console.warn("persistSave", e);
@@ -249,6 +288,7 @@ function RoloMemo() {
   const [sound, setSound] = useState(true);
   const [layout, setLayout] = useState("rolomemo");
   const [menuOpen, setMenuOpen] = useState(false);
+  const [loaded, setLoaded] = useState(false);
 
   const audioCtxRef = useRef(null);
   const ringRef = useRef(null);
@@ -270,6 +310,7 @@ function RoloMemo() {
         setPalette(COLOR_CHOICES_BASE);
         setLayout("rolomemo");
       }
+      setLoaded(true);
     })();
   }, []);
 
@@ -280,7 +321,25 @@ function RoloMemo() {
       persistSave({ notes, currentIndex, palette, layout });
     }, 600);
   };
-  useEffect(scheduleSave, [notes, currentIndex, palette, layout]);
+  useEffect(() => { if (loaded) scheduleSave(); }, [notes, currentIndex, palette, layout, loaded]);
+
+  // Flush su chiusura/hidden: scrive subito su localStorage e prova a salvare su file
+  useEffect(() => {
+    const flush = () => {
+      try {
+        const payload = { notes, currentIndex, palette, layout, updatedAt: Date.now() };
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(payload)); } catch (_) {}
+        if (window?.pywebview?.api?.save) { try { window.pywebview.api.save(payload); } catch (_) {} }
+      } catch (_) {}
+    };
+    const onVis = () => { if (document.visibilityState === 'hidden') flush(); };
+    window.addEventListener('beforeunload', flush);
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      window.removeEventListener('beforeunload', flush);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  }, [notes, currentIndex, palette, layout]);
 
   // Filtraggio tag (substring case-insensitive)
   const filteredNotes = useMemo(() => {

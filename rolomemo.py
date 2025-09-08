@@ -18,7 +18,8 @@ from typing import Dict, Any, Optional
 try:
     import webview
 except ImportError:
-    print("❌ PyWebView non installato. Installa con: pip install pywebview[gtk]")
+    print("PyWebView non installato. Installa con: pip install pywebview")
+    print("Su Linux puoi usare: pip install 'pywebview[gtk]'")
     sys.exit(1)
 
 from pathlib import Path  # se non c'è già
@@ -41,13 +42,23 @@ APP_NAME = "RoloMemo"
 APP_VERSION = "1.0.0"
 DATA_DIR_NAME = "rolomemo"
 
+def _user_data_base() -> Path:
+    """Percorso base per i dati utente, robusto su tutte le piattaforme.
+    Evita di restare con Path('.') quando APPDATA non è valorizzata.
+    """
+    if os.name == 'nt':  # Windows
+        appdata = os.environ.get('APPDATA', '')
+        if appdata and appdata.strip():
+            return Path(appdata)
+        # Fallback standard
+        return Path.home() / 'AppData' / 'Roaming'
+    elif sys.platform == 'darwin':  # macOS
+        return Path.home() / 'Library' / 'Application Support'
+    else:  # Linux/Unix
+        return Path.home() / '.local' / 'share'
+
 # Determina la directory dati dell'utente
-if os.name == 'nt':  # Windows
-    DATA_BASE = Path(os.environ.get('APPDATA', ''))
-elif sys.platform == 'darwin':  # macOS
-    DATA_BASE = Path.home() / 'Library' / 'Application Support'
-else:  # Linux/Unix
-    DATA_BASE = Path.home() / '.local' / 'share'
+DATA_BASE = _user_data_base()
 
 DATA_DIR = DATA_BASE / DATA_DIR_NAME
 CONFIG_FILE = DATA_DIR / "config.json"
@@ -77,23 +88,55 @@ DEFAULT_CONFIG = {
 
 # ========== LOGGING SETUP ==========
 
+class _ConsoleSanitizeFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            enc = getattr(sys.stdout, 'encoding', None) or 'utf-8'
+            # Compute formatted message and strip non encodable chars
+            msg = record.getMessage()
+            safe = msg.encode(enc, errors='ignore').decode(enc, errors='ignore')
+            record.msg = safe
+            record.args = ()
+        except Exception:
+            pass
+        return True
+
 def setup_logging():
     """Configura il sistema di logging"""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     
+    # File handler (UTF-8) e console handler con filtro di sanitizzazione
+    file_handler = logging.FileHandler(LOG_FILE, encoding='utf-8')
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.addFilter(_ConsoleSanitizeFilter())
+
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler(LOG_FILE, encoding='utf-8'),
-            logging.StreamHandler(sys.stdout)
-        ]
+        handlers=[file_handler, console_handler],
     )
     return logging.getLogger(__name__)
 
 logger = setup_logging()
 
 # ========== GESTIONE DATI ==========
+
+# Stampa sicura su Windows (evita errori unicode su console cp1252)
+def _safe_print(*args, **kwargs):
+    try:
+        builtins_print = __builtins__['print'] if isinstance(__builtins__, dict) else __builtins__.print
+    except Exception:
+        builtins_print = print  # fallback
+    try:
+        builtins_print(*args, **kwargs)
+    except UnicodeEncodeError:
+        txt = " ".join(str(a) for a in args)
+        # Rimuove caratteri non codificabili per la console corrente
+        filtered = txt.encode(sys.stdout.encoding or 'utf-8', errors='ignore').decode(sys.stdout.encoding or 'utf-8', errors='ignore')
+        builtins_print(filtered)
+
+# Sovrascrive print nel modulo
+print = _safe_print
 
 class DataManager:
     """Gestisce il salvataggio e caricamento dei dati"""
@@ -274,7 +317,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         </div>
     </div>
     
-    <script type="text/babel">
+    <script type="text/babel" data-presets="env,react">
         // Il componente React verrà inserito qui dalla funzione create_html
         // REACT_COMPONENT_PLACEHOLDER
         
@@ -320,11 +363,72 @@ def get_react_component():
 
 def create_html():
     """Crea l'HTML finale con il componente React"""
+    # Costruisci path asset locali
+    react_path = resource_path("assets/react.production.min.js")
+    react_dom_path = resource_path("assets/react-dom.production.min.js")
+    babel_path = resource_path("assets/babel-standalone.min.js")
+    tailwind_path = resource_path("assets/tailwind.css")
+
+    def asset_missing(p: Path) -> bool:
+        try:
+            if not p.exists():
+                return True
+            # Considera placeholder/mini-file come mancanti
+            if p.suffix == ".js":
+                if p.stat().st_size < 1024:
+                    return True
+            elif p.suffix == ".css":
+                if p.stat().st_size < 256:
+                    return True
+            # Controllo contenuto placeholder (prime 200 byte)
+            head = p.read_text(encoding="utf-8", errors="ignore")[:200].lower()
+            return "placeholder" in head
+        except Exception:
+            return True
+
+    # Verifica asset; se mancanti, mostra una pagina di errore esplicita
+    missing = [str(p) for p in [react_path, react_dom_path, babel_path, tailwind_path] if asset_missing(p)]
+    if missing:
+        logger.error("Asset mancanti: %s", ", ".join(missing))
+        return f"""
+        <!DOCTYPE html>
+        <html lang=\"it\">
+        <head>
+            <meta charset=\"UTF-8\">
+            <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">
+            <title>RoloMemo - Errore asset</title>
+            <style>
+              body {{ font-family: system-ui, Arial, sans-serif; background:#fff7ea; color:#1d1d1f; }}
+              code {{ background:#fff2d8; padding:2px 4px; border-radius:4px; }}
+              .box {{ max-width: 820px; margin: 10vh auto; background:#fffaf1; border:1px solid #e5dfd2; border-radius:12px; padding:24px; }}
+              li {{ margin:6px 0; }}
+            </style>
+        </head>
+        <body>
+            <div class=\"box\">
+                <h1>Impossibile avviare l'interfaccia</h1>
+                <p>Mancano alcuni file nella cartella <code>assets/</code> richiesti per l'esecuzione offline.</p>
+                <p>File mancanti:</p>
+                <ul>
+                    {''.join(f'<li><code>{m}</code></li>' for m in missing)}
+                </ul>
+                <p>Assicurati che in <code>assets/</code> siano presenti i seguenti file reali (non placeholder):</p>
+                <ul>
+                    <li><code>react.production.min.js</code> (UMD)</li>
+                    <li><code>react-dom.production.min.js</code> (UMD)</li>
+                    <li><code>babel-standalone.min.js</code></li>
+                    <li><code>tailwind.css</code> (CSS già compilato)</li>
+                </ul>
+            </div>
+        </body>
+        </html>
+        """
+
     assets = {
-        "react": resource_path("assets/react.production.min.js").as_uri(),
-        "react_dom": resource_path("assets/react-dom.production.min.js").as_uri(),
-        "babel": resource_path("assets/babel-standalone.min.js").as_uri(),
-        "tailwind": resource_path("assets/tailwind.css").as_uri(),
+        "react": react_path.as_uri(),
+        "react_dom": react_dom_path.as_uri(),
+        "babel": babel_path.as_uri(),
+        "tailwind": tailwind_path.as_uri(),
     }
     react_component = get_react_component()
     html = HTML_TEMPLATE.format(**assets)
@@ -346,31 +450,25 @@ class RoloMemoApp:
         """Avvia l'applicazione"""
         try:
             config = self.api.data_manager.config
-            window_config = config['window']
-            
+            # window_config = config['window']  # riservato per futuri usi
+
             logger.info(f"Avvio {APP_NAME} v{APP_VERSION}")
             logger.info(f"Directory dati: {DATA_DIR}")
-            
-            if INDEX_HTML.exists():
-                self.window = webview.create_window(
-                    title="RoloMemo",
-                    url=INDEX_HTML.as_uri(),
-                    width=980,
-                    height=720,
-                    resizable=True,
-                    confirm_close=False,
-                    js_api=self.api,
-                )
-            else:
-                self.window = webview.create_window(
-                    title="RoloMemo",
-                    html=create_html(),  # ← usa html= per stringhe HTML
-                    width=980,
-                    height=720,
-                    resizable=True,
-                    confirm_close=False,
-                    js_api=self.api,
-                )
+
+            # Genera sempre un file HTML locale per garantire risoluzione path
+            DIST_DIR.mkdir(parents=True, exist_ok=True)
+            html = create_html()
+            INDEX_HTML.write_text(html, encoding="utf-8")
+
+            self.window = webview.create_window(
+                title="RoloMemo",
+                url=INDEX_HTML.as_uri(),
+                width=980,
+                height=720,
+                resizable=True,
+                confirm_close=False,
+                js_api=self.api,
+            )
 
             # Event handlers
             self.window.events.closed += self.on_window_closed

@@ -1,27 +1,50 @@
+############################
 # Python
+############################
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
 *.pyd
 .venv/
 venv/
 .env
+.python-version
+*.egg-info/
 
-# Build / dist
+############################
+# Build / dist / artifacts
+############################
 build/
 dist/
 *.spec
+*.zip
+*.7z
+*.tar
+*.tar.gz
+*.tgz
 
-# Logs / cache
+############################
+# Logs / cache / coverage
+############################
 *.log
-*.cache/
 .cache/
+*.cache/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage*
+coverage.xml
+htmlcov/
 
+############################
 # OS / editor
+############################
 .DS_Store
 Thumbs.db
 .vscode/
 .idea/
+.vs/
 
-# Node (se in futuro userai bundler)
+############################
+# Node (eventuale)
+############################
 node_modules/
