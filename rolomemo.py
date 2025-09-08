@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-RoloMemo Desktop App v1.0.1
+RoloMemo Desktop App
 ===================
 Wrapper desktop per RoloMemo usando PyWebView
 Gestisce il salvataggio dei dati localmente e l'interfaccia desktop
