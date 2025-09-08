@@ -6,6 +6,11 @@ RoloMemo è un’app desktop (Windows/macOS/Linux) per prendere note in stile Ro
 Powered by https://digitalezen.it
 
 
+Download Veloci
+- Ultima release (zip pronto): [Releases → Latest](https://github.com/Ricninja89/rolomemo/releases/latest)
+- Artifact CI (zip da Actions): [Actions → Windows Build](https://github.com/Ricninja89/rolomemo/actions/workflows/windows-build.yml)
+
+
 Scaricare e Usare (Windows)
 - Vai nella sezione “Actions” o “Releases” del repository GitHub e scarica lo zip generato dal workflow:
   - One‑Dir: contiene `RoloMemo.exe` più cartelle di supporto (consigliato)
@@ -63,4 +68,3 @@ Vedi `CONTRIBUTING.md`. Apri una issue per bug/feature (template disponibili). C
 
 Licenza
 MIT — vedi `LICENSE`.
-

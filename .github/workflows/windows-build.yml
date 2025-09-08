@@ -34,11 +34,21 @@ jobs:
       - name: Build (One-Dir)
         run: python build_installer.py
 
-      - name: Zip artifact(s)
+      - name: Zip One-Dir
         shell: pwsh
         run: |
           Set-Location dist
           if (Test-Path RoloMemo) { Compress-Archive -Path RoloMemo -DestinationPath RoloMemo-Windows-OneDir.zip -Force }
+
+      - name: Build (One-File)
+        env:
+          ROLOMEMO_ONEFILE: '1'
+        run: python build_installer.py
+
+      - name: Zip One-File
+        shell: pwsh
+        run: |
+          Set-Location dist
           if (Test-Path RoloMemo.exe) { Compress-Archive -Path RoloMemo.exe -DestinationPath RoloMemo-Windows-OneFile.zip -Force }
 
       - name: Upload artifact
@@ -56,6 +66,7 @@ jobs:
         with:
           files: |
             dist/RoloMemo-Windows-OneDir.zip
+            dist/RoloMemo-Windows-OneFile.zip
           token: ${{ secrets.GITHUB_TOKEN }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

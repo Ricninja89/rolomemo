@@ -39,7 +39,7 @@ INDEX_HTML = DIST_DIR / "index.html"
 # ========== CONFIGURAZIONE ==========
 
 APP_NAME = "RoloMemo"
-APP_VERSION = "1.0.1"
+APP_VERSION = "1.0.2"
 DATA_DIR_NAME = "rolomemo"
 
 def _user_data_base() -> Path:

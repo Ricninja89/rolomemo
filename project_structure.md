@@ -175,4 +175,4 @@ MIT License - Vedi file LICENSE per dettagli
 
 ---
 
-*RoloMemo v1.0.0 - Stile vintage per note moderne*
+*RoloMemo v1.0.2 - Stile vintage per note moderne*
