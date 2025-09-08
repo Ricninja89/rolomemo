@@ -7,6 +7,9 @@ on:
       - 'v*'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build-windows:
     runs-on: windows-latest
@@ -53,7 +56,6 @@ jobs:
         with:
           files: |
             dist/RoloMemo-Windows-OneDir.zip
-            dist/RoloMemo-Windows-OneFile.zip
+          token: ${{ secrets.GITHUB_TOKEN }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
