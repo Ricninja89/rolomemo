@@ -33,8 +33,6 @@ def resource_path(relative: str) -> Path:
 
 
 BASE_DIR = resource_path("")
-DIST_DIR = BASE_DIR / "dist"
-INDEX_HTML = DIST_DIR / "index.html"
 
 # ========== CONFIGURAZIONE ==========
 
@@ -82,7 +80,8 @@ DEFAULT_CONFIG = {
         "debug": False,
         "auto_save": True,
         "backup_count": 5,
-        "theme": "light"
+        "theme": "light",
+        "auto_start": False
     }
 }
 
@@ -196,8 +195,32 @@ class DataManager:
     def save_notes(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Salva le note nel file"""
         try:
+            # Carica stato corrente per salvaguardia
+            existing = None
+            try:
+                if NOTES_FILE.exists():
+                    with open(NOTES_FILE, 'r', encoding='utf-8') as f:
+                        existing = json.load(f)
+            except Exception:
+                existing = None
+
+            incoming_notes = data.get('notes', []) if isinstance(data, dict) else []
+            incoming_count = len(incoming_notes) if isinstance(incoming_notes, list) else 0
+            existing_count = len(existing.get('notes', [])) if isinstance(existing, dict) else 0
+            incoming_ts = int(data.get('updatedAt', 0)) if isinstance(data, dict) else 0
+            existing_ts = int((existing or {}).get('updatedAt', 0))
+
+            # Salvaguardia anti-azzeramento: se il nuovo payload ha molte meno note e timestamp non piu' recente, rifiuta
+            if existing_count > 0 and incoming_count >= 0:
+                too_much_loss = (incoming_count < max(1, int(existing_count * 0.5)))
+                not_newer = incoming_ts and existing_ts and (incoming_ts <= existing_ts)
+                if (incoming_count == 0 and not_newer) or (too_much_loss and not_newer):
+                    logger.warning("Salvataggio rifiutato per salvaguardia: perdita note significativa o timestamp non piu' recente")
+                    return {"ok": False, "error": "Safeguard: prevenuto un salvataggio che avrebbe perso molte note"}
+
             # Backup precedente se esiste
-            if NOTES_FILE.exists() and self.config['app']['backup_count'] > 0:
+            backup_count = int(self.config.get('app', {}).get('backup_count', DEFAULT_CONFIG['app']['backup_count']))
+            if NOTES_FILE.exists() and backup_count > 0:
                 self.create_backup()
             
             with open(NOTES_FILE, 'w', encoding='utf-8') as f:
@@ -219,7 +242,7 @@ class DataManager:
             
             # Mantieni solo gli ultimi N backup
             backups = sorted(backup_dir.glob("notes_*.json"))
-            max_backups = self.config['app']['backup_count']
+            max_backups = int(self.config.get('app', {}).get('backup_count', DEFAULT_CONFIG['app']['backup_count']))
             
             if len(backups) >= max_backups:
                 for old_backup in backups[:-max_backups+1]:
@@ -235,6 +258,96 @@ class DataManager:
             
         except Exception as e:
             logger.warning(f"Errore creazione backup: {e}")
+
+    def list_backups(self):
+        try:
+            backup_dir = DATA_DIR / "backups"
+            if not backup_dir.exists():
+                return []
+            return sorted(backup_dir.glob("notes_*.json"), reverse=True)
+        except Exception:
+            return []
+
+    def restore_last_backup(self) -> Dict[str, Any]:
+        try:
+            backups = self.list_backups()
+            if not backups:
+                return {"ok": False, "error": "Nessun backup disponibile"}
+            latest = backups[0]
+            shutil.copy2(latest, NOTES_FILE)
+            logger.info(f"Ripristinato backup: {latest.name}")
+            return {"ok": True, "file": str(latest)}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    # ===== Avvio automatico (Windows) =====
+    @staticmethod
+    def _is_windows() -> bool:
+        return os.name == 'nt'
+
+    def get_auto_start_status(self) -> Dict[str, Any]:
+        """Verifica se l'avvio automatico su Windows è attivo (Run key HKCU).
+        Su altri sistemi ritorna sempre False con info di piattaforma.
+        """
+        if not self._is_windows():
+            return {"ok": True, "enabled": False, "platform": sys.platform}
+        try:
+            import winreg
+            run_key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, run_key_path, 0, winreg.KEY_READ) as key:
+                try:
+                    val, _ = winreg.QueryValueEx(key, APP_NAME)
+                    enabled = isinstance(val, str) and len(val.strip()) > 0
+                except FileNotFoundError:
+                    enabled = False
+            return {"ok": True, "enabled": enabled}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def set_auto_start(self, enabled: bool) -> Dict[str, Any]:
+        """Abilita/disabilita l'avvio automatico su Windows scrivendo nel registro HKCU Run.
+        Aggiorna anche la config locale (app.auto_start).
+        """
+        if not self._is_windows():
+            # Aggiorna solo la config per coerenza, ma segnala la piattaforma
+            try:
+                self.config.setdefault('app', {})['auto_start'] = bool(enabled)
+                self.save_config(self.config)
+            except Exception:
+                pass
+            return {"ok": False, "error": "Auto-start disponibile solo su Windows"}
+
+        try:
+            import winreg
+            run_key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
+
+            # Costruisci il comando di avvio
+            if getattr(sys, '_MEIPASS', None):
+                # PyInstaller onefile: eseguibile stesso
+                cmd = f'"{sys.executable}"'
+            else:
+                # Sorgente: prova pythonw.exe se disponibile per evitare console
+                exe = Path(sys.executable)
+                pyw = exe.with_name('pythonw.exe')
+                pybin = pyw if pyw.exists() else exe
+                script = Path(__file__).resolve()
+                cmd = f'"{pybin}" "{script}"'
+
+            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, run_key_path) as key:
+                if enabled:
+                    winreg.SetValueEx(key, APP_NAME, 0, winreg.REG_SZ, cmd)
+                else:
+                    try:
+                        winreg.DeleteValue(key, APP_NAME)
+                    except FileNotFoundError:
+                        pass
+
+            # Aggiorna config
+            self.config.setdefault('app', {})['auto_start'] = bool(enabled)
+            self.save_config(self.config)
+            return {"ok": True, "enabled": bool(enabled)}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
 
 # ========== API PER FRONTEND ==========
 
@@ -259,8 +372,23 @@ class RoloMemoAPI:
     def update_config(self, updates: Dict[str, Any]) -> Dict[str, Any]:
         """Aggiorna la configurazione"""
         try:
-            self.data_manager.config.update(updates)
-            self.data_manager.save_config(self.data_manager.config)
+            # Unione profonda almeno per la sezione 'app' per non perdere chiavi
+            cfg = self.data_manager.config
+            if isinstance(updates, dict):
+                app_upd = updates.get('app') if isinstance(updates.get('app'), dict) else None
+                # aggiorna altre chiavi top-level (senza 'app')
+                for k, v in updates.items():
+                    if k == 'app':
+                        continue
+                    cfg[k] = v
+                # unione app
+                if app_upd is not None:
+                    cfg.setdefault('app', {})
+                    cfg['app'].update(app_upd)
+            else:
+                # fallback: semplice
+                cfg.update(updates)
+            self.data_manager.save_config(cfg)
             return {"ok": True}
         except Exception as e:
             return {"ok": False, "error": str(e)}
@@ -274,6 +402,17 @@ class RoloMemoAPI:
             "notes_file": str(NOTES_FILE),
             "config_file": str(CONFIG_FILE)
         }
+
+    # Auto-start Windows
+    def get_auto_start_status(self) -> Dict[str, Any]:
+        return self.data_manager.get_auto_start_status()
+
+    def set_auto_start(self, enabled: bool) -> Dict[str, Any]:
+        return self.data_manager.set_auto_start(bool(enabled))
+
+    # Backups
+    def restore_last_backup(self) -> Dict[str, Any]:
+        return self.data_manager.restore_last_backup()
 
 # ========== HTML TEMPLATE ==========
 
@@ -305,6 +444,17 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             --color-mustard: #d6a516;
         }}
     </style>
+    <script>
+      // Mostra errori JS in pagina per debug in caso di engine legacy
+      window.onerror = function(message, source, lineno, colno, error) {{
+        try {{
+          const box = document.createElement('div');
+          box.style.cssText = 'position:fixed;left:12px;right:12px;bottom:12px;background:#fffaf1;border:1px solid #e5dfd2;color:#1d1d1f;padding:12px;border-radius:8px;z-index:99999;font-family:system-ui,Arial,sans-serif;max-height:40vh;overflow:auto';
+          box.innerHTML = '<b>Errore JS:</b> ' + String(message) + '<br><small>' + String(source) + ':' + lineno + ':' + colno + '</small>';
+          document.body.appendChild(box);
+        }} catch(_) {{}}
+      }};
+    </script>
 </head>
 <body>
     <div id="root">
@@ -317,7 +467,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         </div>
     </div>
     
-    <script type="text/babel" data-presets="env,react">
+    <script type="text/babel" data-presets="env,react" data-plugins="proposal-optional-chaining,proposal-nullish-coalescing-operator,proposal-class-properties,transform-object-rest-spread">
         // Il componente React verrà inserito qui dalla funzione create_html
         // REACT_COMPONENT_PLACEHOLDER
         
@@ -442,6 +592,7 @@ class RoloMemoApp:
     def __init__(self):
         self.api = RoloMemoAPI()
         self.window = None
+        self._temp_html: Optional[Path] = None
 
     def inline_html(self) -> str:
         return create_html()
@@ -455,14 +606,21 @@ class RoloMemoApp:
             logger.info(f"Avvio {APP_NAME} v{APP_VERSION}")
             logger.info(f"Directory dati: {DATA_DIR}")
 
-            # Genera sempre un file HTML locale per garantire risoluzione path
-            DIST_DIR.mkdir(parents=True, exist_ok=True)
+            # Genera sempre un file HTML temporaneo (compatibile con PyInstaller onefile)
             html = create_html()
-            INDEX_HTML.write_text(html, encoding="utf-8")
+            try:
+                tmp_dir = Path(tempfile.gettempdir())
+                tmp_dir.mkdir(parents=True, exist_ok=True)
+                tmp_path = tmp_dir / f"rolomemo_{os.getpid()}_{int(__import__('time').time())}.html"
+                tmp_path.write_text(html, encoding="utf-8")
+                self._temp_html = tmp_path
+            except Exception as e:
+                logger.error(f"Impossibile creare file HTML temporaneo: {e}")
+                raise
 
             self.window = webview.create_window(
                 title="RoloMemo",
-                url=INDEX_HTML.as_uri(),
+                url=self._temp_html.as_uri() if self._temp_html else None,
                 width=980,
                 height=720,
                 resizable=True,
@@ -475,7 +633,30 @@ class RoloMemoApp:
             
             # Avvia l'app
             debug_mode = config['app'].get('debug', False)
-            webview.start(debug=debug_mode)
+            # Forza Edge (Chromium) su Windows per evitare MSHTML/IE che blocca Babel/React
+            gui_backend = None
+            if os.name == 'nt':
+                gui_backend = 'edgechromium'
+            # Profilo persistente per storage (localStorage/cookie) per evitare reset ad ogni avvio
+            storage_dir = DATA_DIR / 'webview_profile'
+            try:
+                storage_dir.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                pass
+            try:
+                if gui_backend:
+                    logger.info(f"Avvio webview con backend: {gui_backend}")
+                    webview.start(
+                        debug=debug_mode,
+                        gui=gui_backend,
+                        private_mode=False,
+                        storage_path=str(storage_dir)
+                    )
+                else:
+                    webview.start(debug=debug_mode, private_mode=False, storage_path=str(storage_dir))
+            except Exception as e:
+                logger.warning(f"Backend {gui_backend} non disponibile ({e}), fallback predefinito")
+                webview.start(debug=debug_mode, private_mode=False, storage_path=str(storage_dir))
             
         except Exception as e:
             logger.error(f"Errore avvio applicazione: {e}")
@@ -485,6 +666,11 @@ class RoloMemoApp:
         """Gestisce la chiusura della finestra"""
         logger.info("Applicazione chiusa dall'utente")
         # Eventuali operazioni di cleanup qui
+        try:
+            if self._temp_html and self._temp_html.exists():
+                self._temp_html.unlink(missing_ok=True)
+        except Exception:
+            pass
 
 # ========== SCRIPT PRINCIPALE ==========
 
@@ -519,3 +705,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+

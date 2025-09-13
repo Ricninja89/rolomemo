@@ -31,14 +31,13 @@ Prerequisiti: Python 3.9+ (testato con 3.13), PowerShell.
    - `./venv/Scripts/Activate.ps1`
    - `pip install -r requirements.txt`
 
-2) Genera HTML offline e build One‑Dir
-   - `./venv/Scripts/python scripts/generate_index.py`
+2) Build One-Dir
    - `./venv/Scripts/python build_installer.py`
 
 3) Avvia
    - `dist/RoloMemo/RoloMemo.exe`
 
-One‑File (opzionale)
+One-File (opzionale)
 - PowerShell: `$env:ROLOMEMO_ONEFILE='1' ; ./venv/Scripts/python build_installer.py`
 - Output: `dist/RoloMemo.exe`
 
@@ -48,12 +47,12 @@ Linux/macOS (nota)
 
 
 Struttura
-- `rolomemo.py` — app PyWebView; genera `dist/index.html` e apre asset locali in `assets/`
-- `rolomemo_component.js` — componente React iniettato in `<script type="text/babel">`
-- `assets/` — React/ReactDOM UMD, Babel standalone, Tailwind frozen CSS
-- `scripts/generate_index.py` — genera `dist/index.html` offline
-- `build_installer.py` — PyInstaller One‑Dir/One‑File
-- `scripts/release_win.ps1` — release script Windows (clean + build + verifica)
+- `rolomemo.py` - app PyWebView; genera un HTML temporaneo e apre asset locali in `assets/`
+- `rolomemo_component.js` - componente React iniettato in `<script type="text/babel">`
+- `assets/` - React/ReactDOM UMD, Babel standalone, Tailwind frozen CSS
+- `scripts/generate_index.py` - (opzionale) genera `dist/index.html` offline
+- `build_installer.py` - PyInstaller One-Dir/One-File
+- `scripts/release_win.ps1` - release script Windows (clean + build + verifica)
 
 
 Troubleshooting

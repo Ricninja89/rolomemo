@@ -85,10 +85,31 @@ Niente font remoti: usa default di sistema.
 
 Testa disconnesso: l’app deve aprirsi e salvare note in %APPDATA%/rolomemo/notes.json.
 
-8) [ ] Test manuali post-build
+IMPLEMENTAZIONI
 
-Avvio: nessun “loading infinito”. Se succede, è quasi sempre un path asset non risolto.
+1) Aggiungi nella colonna dei tag la possibilità di aggiungere nuovi tag e di eliminare quelli esistenti
 
-Verifica: rotella, doppio click/espansione, overlay che copre il ring, z-index in primo piano, layout switch (Rolomemo/Grid), drawer mobile, salvataggio e ripristino note, seed onboarding alla prima apertura.
+2) Aggiungi nella header un icona per aprire una sezione "impostazioni"
 
-Riduzione finestra: ring centrato, overlay nota espansa contenuta in viewport, hamburger funziona.
+3) Impostazioni apre una finestra popup contenente le impostazioni del programma
+
+4) Aggiungi nel menù impostazioni la possibilità di abilitare "avvia all'avvio di winows"
+
+5) Nelle impostazioni aggiungi la possibilità di selezionare un tema per l'app. Ogni Tema comprende modifiche sia alla paletta di colori per le card che agli altri colori del programma. 
+
+6) In impostazioni i temi selezionabili saranno 3: 1. Tema Retrò (quello attuale di base) 2. Tema dark  3. Tema Zen (colori chiari e rilassanti)
+
+7) Aggiungi in Impostazioni la possibilità di creare una paletta di colori per le card personalizzata scegliendo tra una buona varietà di colori predefiniti o di aggiungere i propri tramite codice colore
+
+8) All'interno della card espansa accanto ai colori, l'icona per aggiungere un colore viene sostituita con un icona che rimanda alle palette personalizzate in impostazioni
+
+9) All'interno della card espansa la possibilità di rimuovere i tag già asseegnati.
+
+10) Dentro la card espansa abilitare la possibilità di usare il click destro del mouse per le operazioni classiche (copia, incolla, seleziona tutto, ecc)
+
+11) Dentro la card espansa implementare funzionalità da editor di testo: icone base per testo corsivo, grassetto, sottolineato, elenco, che si applicano al testo selezionato. Inoltre la card espansa deve accettare comandi da tastiera (ctrl + B per trasformare in grassetto un testo selezionato, ecc)
+
+12) l'editor testuale della card espansa deve riconoscere il formato md, per formattazioni rapide. 
+
+13) l'editor testuale della card espansa riconoscera il carattere "-" per iniziare un elenco puntato, così come riconoscerà "--" per l'elenco puntato nidificato. Inoltre da un elenco puntato usando il tasto tab si passerà all'elenco nidificato e viceversa con MAIUSC+TAB.
+

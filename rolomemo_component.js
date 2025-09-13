@@ -15,6 +15,60 @@ const TOKENS = {
   mustard: "#d6a516",
 };
 
+// Temi: Retro (default), Dark, Zen
+const THEMES = {
+  retro: {
+    cream: "#fff7ea",
+    avocado: "#7a8f3c",
+    burnt: "#c1542a",
+    ink: "#1d1d1f",
+    smoke: "#3b3b40",
+    mustard: "#d6a516",
+    bg: "#fff7ea",
+    panel: "#fffaf1",
+  },
+  dark: {
+    cream: "#121212",
+    avocado: "#5a7a2f",
+    burnt: "#b04328",
+    ink: "#f2f2f2",
+    smoke: "#c7c7c7",
+    mustard: "#c8a21a",
+    bg: "#0f0f0f",
+    panel: "#1a1a1a",
+  },
+  zen: {
+    cream: "#f6fbff",
+    avocado: "#77bfa3",
+    burnt: "#ee8572",
+    ink: "#24323a",
+    smoke: "#6f8793",
+    mustard: "#a0c4ff",
+    bg: "#f6fbff",
+    panel: "#ffffff",
+  }
+};
+
+function themeDefaultPalette(name) {
+  const t = THEMES[name] || THEMES.retro;
+  if (name === 'dark') return [t.burnt, t.avocado, t.mustard, "#334155"];
+  if (name === 'zen') return [t.avocado, t.mustard, "#ffd6a5", "#caffbf"];
+  return [t.avocado, t.burnt, t.mustard, t.cream];
+}
+
+function applyThemeCssVars(name) {
+  const t = THEMES[name] || THEMES.retro;
+  try {
+    const r = document.documentElement;
+    r.style.setProperty('--color-cream', t.cream);
+    r.style.setProperty('--color-avocado', t.avocado);
+    r.style.setProperty('--color-burnt', t.burnt);
+    r.style.setProperty('--color-ink', t.ink);
+    r.style.setProperty('--color-smoke', t.smoke);
+    r.style.setProperty('--color-mustard', t.mustard);
+  } catch (_) {}
+}
+
 /* ===========================
    Persistenza (pywebview + fallback localStorage)
    =========================== */
@@ -284,32 +338,189 @@ function RoloMemo() {
   const [currentIndex, setCurrentIndex] = useState(0);       // indice nel filtrato
   const [expandedIndex, setExpandedIndex] = useState(null);  // se front espansa
   const [palette, setPalette] = useState(COLOR_CHOICES_BASE);
+  const [useCustomPalette, setUseCustomPalette] = useState(false);
+  const [theme, setTheme] = useState('retro');
   const [tagFilter, setTagFilter] = useState("");
   const [sound, setSound] = useState(true);
   const [layout, setLayout] = useState("rolomemo");
   const [menuOpen, setMenuOpen] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  // Tag aggiuntivi definiti dall'utente (non necessariamente presenti nelle note)
+  const [extraTags, setExtraTags] = useState([]);
+  // Stato per apertura impostazioni (popup in implementazione 3)
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  // Stato configurazione app (caricata da backend Python)
+  const [appConfig, setAppConfig] = useState(null);
+  const [cfgLoading, setCfgLoading] = useState(false);
+  const [cfgError, setCfgError] = useState("");
+  // Avvio automatico (Windows)
+  const [autoStart, setAutoStart] = useState(null); // null = sconosciuto
+  const [autoStartBusy, setAutoStartBusy] = useState(false);
+  const [autoStartError, setAutoStartError] = useState("");
+  // Chiudi suggerimenti tag al cambio scheda espansa
+  useEffect(() => { setTagSuggestOpen(false); setTagQuery(""); }, [expandedIndex]);
+
+  const loadConfig = async () => {
+    setCfgLoading(true);
+    setCfgError("");
+    try {
+      await waitForPywebviewApi(1000);
+      if (window?.pywebview?.api?.get_config) {
+        const cfg = await window.pywebview.api.get_config();
+        setAppConfig(cfg || null);
+        try {
+          const t = String(cfg?.app?.theme || '').toLowerCase();
+          if (t && (t in THEMES)) setTheme(t);
+        } catch(_){}
+      } else {
+        setAppConfig(null);
+      }
+      // Stato avvio automatico
+      if (window?.pywebview?.api?.get_auto_start_status) {
+        try {
+          const st = await window.pywebview.api.get_auto_start_status();
+          if (st && st.ok !== false) setAutoStart(!!st.enabled);
+        } catch (_) { /* ignore */ }
+      }
+    } catch (e) {
+      setCfgError(String(e));
+    } finally {
+      setCfgLoading(false);
+    }
+  };
+
+  const updateConfigPart = async (updates) => {
+    try {
+      // merge superficiale su root e su app
+      setAppConfig(prev => ({
+        ...(prev || {}),
+        ...updates,
+        app: { ...((prev && prev.app) || {}), ...(updates.app || {}) },
+      }));
+      await waitForPywebviewApi(1000);
+      if (window?.pywebview?.api?.update_config) {
+        await window.pywebview.api.update_config(updates);
+      }
+    } catch (_) { /* silent */ }
+  };
+
+  // Carica config quando si apre la finestra impostazioni
+  useEffect(() => {
+    if (settingsOpen) {
+      loadConfig();
+    }
+  }, [settingsOpen]);
+
+  // ESC per chiudere la finestra impostazioni
+  useEffect(() => {
+    if (!settingsOpen) return;
+    const onKey = (e) => { if (e.key === 'Escape') setSettingsOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [settingsOpen]);
+
+  const setAutoStartEnabled = async (enabled) => {
+    setAutoStartBusy(true);
+    setAutoStartError("");
+    try {
+      await waitForPywebviewApi(1000);
+      if (window?.pywebview?.api?.set_auto_start) {
+        const res = await window.pywebview.api.set_auto_start(!!enabled);
+        if (res && res.ok !== false) {
+          setAutoStart(!!enabled);
+          // aggiorna anche la config locale
+          updateConfigPart({ app: { auto_start: !!enabled } });
+        } else {
+          setAutoStartError(res?.error || 'Operazione non riuscita');
+        }
+      }
+    } catch (e) {
+      setAutoStartError(String(e));
+    } finally {
+      setAutoStartBusy(false);
+    }
+  };
 
   const audioCtxRef = useRef(null);
   const ringRef = useRef(null);
   const saveTimer = useRef(null);
+  const suppressNextSave = useRef(false);
+  const editorRefs = useRef(new Map());
+  const [ctxMenu, setCtxMenu] = useState({ open: false, x: 0, y: 0, index: null });
+  // Input tag (nota espansa): query e popup suggerimenti
+  const [tagQuery, setTagQuery] = useState("");
+  const [tagSuggestOpen, setTagSuggestOpen] = useState(false);
+  const tagInputRef = useRef(null);
+  const tagSuggestCloseTimer = useRef(null);
+  const [tagSuggestPos, setTagSuggestPos] = useState({ x: 0, y: 0, w: 0 });
+  const updateTagSuggestPos = () => {
+    try {
+      const el = tagInputRef.current; if (!el) return;
+      const r = el.getBoundingClientRect();
+      setTagSuggestPos({ x: r.left, y: r.bottom, w: r.width });
+    } catch(_) {}
+  };
+  useEffect(() => {
+    if (!tagSuggestOpen) return;
+    const onScroll = () => updateTagSuggestPos();
+    const onResize = () => updateTagSuggestPos();
+    updateTagSuggestPos();
+    window.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', onResize);
+    return () => {
+      window.removeEventListener('scroll', onScroll, true);
+      window.removeEventListener('resize', onResize);
+    };
+  }, [tagSuggestOpen]);
 
   // Carica payload
   useEffect(() => {
     (async () => {
-      const data = await persistLoad();
+      // Loader smart: preferisci file per evitare overwrite da localStorage demo
+      let data = null;
+      try {
+        try { await waitForPywebviewApi(2000); } catch (_) {}
+        let fileData = null;
+        if (window?.pywebview?.api?.load) {
+          try { fileData = await window.pywebview.api.load(); } catch (_) { fileData = null; }
+        }
+        const raw = (() => { try { return localStorage.getItem(STORAGE_KEY); } catch (_) { return null } })();
+        const localData = raw ? JSON.parse(raw) : null;
+        const fileTs = fileData && typeof fileData.updatedAt === 'number' ? fileData.updatedAt : 0;
+        const localTs = localData && typeof localData.updatedAt === 'number' ? localData.updatedAt : 0;
+        const fileHas = !!(fileData && Array.isArray(fileData.notes) && fileData.notes.length);
+        const localHas = !!(localData && Array.isArray(localData.notes) && localData.notes.length);
+        const isDemo = (p) => { try { const ns = Array.isArray(p?.notes) ? p.notes : []; if (!ns.length) return false; const t = new Set(ns.map(n => String(n?.title||'').toLowerCase())); return t.has('benvenuto ??') || t.has('rotellina = rolomemo') || t.has('nuova nota'); } catch(_) { return false; } };
+        if (fileHas) { if (localHas && localTs > fileTs && !isDemo(localData)) { data = localData; } else { data = fileData; } }
+        else if (localHas) { data = localData; }
+        else { data = fileTs >= localTs ? (fileData || localData) : (localData || fileData); }
+      } catch (_) { data = null; }
       if (data && Array.isArray(data.notes) && data.notes.length) {
         setNotes(data.notes);
         setCurrentIndex(Math.min(data.currentIndex || 0, Math.max(0, (data.notes.length || 1) - 1)));
-        setPalette(Array.isArray(data.palette) && data.palette.length ? data.palette : COLOR_CHOICES_BASE);
+        const themeFromData = (data && data.theme && (data.theme in THEMES)) ? data.theme : null;
+        const useCustomFromData = !!data.useCustomPalette;
+        if (themeFromData) setTheme(themeFromData); else setTheme('retro');
+        setUseCustomPalette(useCustomFromData);
+        if (useCustomFromData && Array.isArray(data.palette) && data.palette.length) {
+          setPalette(data.palette);
+        } else {
+          setPalette(themeDefaultPalette(themeFromData || 'retro'));
+        }
         setLayout((data && data.layout) ? data.layout : "rolomemo");
+        setExtraTags(Array.isArray(data.extraTags) ? data.extraTags : []);
       } else {
         // Primo avvio o archivio vuoto → seed onboarding
         setNotes(demoNotes);
         setCurrentIndex(0);
-        setPalette(COLOR_CHOICES_BASE);
+        setTheme('retro');
+        setUseCustomPalette(false);
+        setPalette(themeDefaultPalette('retro'));
         setLayout("rolomemo");
+        setExtraTags([]);
       }
+      // Evita il primo autosave dopo il load
+      suppressNextSave.current = true;
       setLoaded(true);
     })();
   }, []);
@@ -318,16 +529,17 @@ function RoloMemo() {
   const scheduleSave = () => {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      persistSave({ notes, currentIndex, palette, layout });
+      if (suppressNextSave.current) { suppressNextSave.current = false; return; }
+      persistSave({ notes, currentIndex, palette, layout, extraTags, theme, useCustomPalette });
     }, 600);
   };
-  useEffect(() => { if (loaded) scheduleSave(); }, [notes, currentIndex, palette, layout, loaded]);
+  useEffect(() => { if (loaded) scheduleSave(); }, [notes, currentIndex, palette, layout, extraTags, loaded]);
 
   // Flush su chiusura/hidden: scrive subito su localStorage e prova a salvare su file
   useEffect(() => {
     const flush = () => {
       try {
-        const payload = { notes, currentIndex, palette, layout, updatedAt: Date.now() };
+        const payload = { notes, currentIndex, palette, layout, extraTags, theme, useCustomPalette, updatedAt: Date.now() };
         try { localStorage.setItem(STORAGE_KEY, JSON.stringify(payload)); } catch (_) {}
         if (window?.pywebview?.api?.save) { try { window.pywebview.api.save(payload); } catch (_) {} }
       } catch (_) {}
@@ -339,7 +551,12 @@ function RoloMemo() {
       window.removeEventListener('beforeunload', flush);
       document.removeEventListener('visibilitychange', onVis);
     };
-  }, [notes, currentIndex, palette, layout]);
+  }, [notes, currentIndex, palette, layout, extraTags]);
+  
+  // Applica CSS vars del tema
+  useEffect(() => {
+    applyThemeCssVars(theme);
+  }, [theme]);
 
   // Filtraggio tag (substring case-insensitive)
   const filteredNotes = useMemo(() => {
@@ -433,14 +650,278 @@ function RoloMemo() {
     setNotes(prev => prev.map((n, k) => (k === idx ? { ...n, tags: Array.from(new Set([...(n.tags || []), t])) } : n)));
   };
 
-  // Tag sidebar
-  const allTags = useMemo(() => computeAllTags(notes), [notes]);
+  // Tag sidebar: unione dei tag presenti nelle note + extra definiti dall'utente
+  const allTags = useMemo(() => {
+    const fromNotes = computeAllTags(notes);
+    const extra = Array.isArray(extraTags) ? extraTags : [];
+    const merged = Array.from(new Set([...fromNotes, ...extra.map(normTag)])).filter(Boolean);
+    return merged.sort((a, b) => a.localeCompare(b));
+  }, [notes, extraTags]);
   const tagCounts = useMemo(() => computeTagCounts(notes), [notes]);
 
+  // ===== Editor helpers =====
+  const wrapSelection = (fi, before, after) => {
+    const ta = editorRefs.current.get(fi);
+    if (!ta) return;
+    const start = ta.selectionStart || 0;
+    const end = ta.selectionEnd || 0;
+    const val = ta.value;
+    const sel = val.slice(start, end);
+    const next = val.slice(0, start) + before + sel + after + val.slice(end);
+    updateNote(fi, 'text', next);
+    setTimeout(() => {
+      const pos = start + before.length + sel.length;
+      try { ta.focus(); ta.setSelectionRange(pos, pos); } catch(_){}
+    }, 0);
+  };
+  const formatSelection = (fi, kind) => {
+    if (kind === 'bold') return wrapSelection(fi, '**', '**');
+    if (kind === 'italic') return wrapSelection(fi, '_', '_');
+    if (kind === 'underline') return wrapSelection(fi, '<u>', '</u>');
+  };
+  const getLineInfo = (ta) => {
+    const pos = ta.selectionStart || 0;
+    const val = ta.value;
+    const lineStart = val.lastIndexOf('\n', pos - 1) + 1;
+    const lineEnd = val.indexOf('\n', pos);
+    const end = lineEnd === -1 ? val.length : lineEnd;
+    return { pos, val, lineStart, end };
+  };
+  const toggleListAtSelection = (fi) => {
+    const ta = editorRefs.current.get(fi);
+    if (!ta) return;
+    const { val, lineStart, end } = getLineInfo(ta);
+    const line = val.slice(lineStart, end);
+    let repl;
+    if (/^\s*-\s/.test(line)) repl = line.replace(/^\s*-\s?/, '');
+    else repl = '- ' + line;
+    const next = val.slice(0, lineStart) + repl + val.slice(end);
+    const shift = repl.length - line.length;
+    const caret = (ta.selectionStart || 0) + shift;
+    updateNote(fi, 'text', next);
+    setTimeout(() => { try { ta.focus(); ta.setSelectionRange(caret, caret); } catch(_){} }, 0);
+  };
+  const indentList = (fi, outdent=false) => {
+    const ta = editorRefs.current.get(fi);
+    if (!ta) return;
+    const { val, lineStart, end } = getLineInfo(ta);
+    const line = val.slice(lineStart, end);
+    let repl = line;
+    if (outdent) repl = line.replace(/^\s{0,2}-\s?/, '- ');
+    else repl = line.replace(/^\s*(-\s?)/, '- - ');
+    const next = val.slice(0, lineStart) + repl + val.slice(end);
+    const shift = repl.length - line.length;
+    const caret = (ta.selectionStart || 0) + shift;
+    updateNote(fi, 'text', next);
+    setTimeout(() => { try { ta.focus(); ta.setSelectionRange(caret, caret); } catch(_){} }, 0);
+  };
+  const handleEditorKeyDown = (e, fi) => {
+    // kept for legacy (textarea) – no longer used
+  };
+  const handleEditorKeyDownRich = (e, fi) => {
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && (e.key === 'b' || e.key === 'B')) { e.preventDefault(); document.execCommand('bold'); handleEditorHtmlChange(fi); return; }
+    if (mod && (e.key === 'i' || e.key === 'I')) { e.preventDefault(); document.execCommand('italic'); handleEditorHtmlChange(fi); return; }
+    if (mod && (e.key === 'u' || e.key === 'U')) { e.preventDefault(); document.execCommand('underline'); handleEditorHtmlChange(fi); return; }
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      document.execCommand(e.shiftKey ? 'outdent' : 'indent');
+      handleEditorHtmlChange(fi);
+    }
+  };
+
+  const toggleBulletList = (fi) => {
+    const el = editorRefs.current.get(fi); if (!el) return;
+    el.focus();
+    // Assicura che la selezione sia dentro il contentEditable
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || !el.contains(sel.anchorNode)) {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      range.collapse(false);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+    // Se siamo dentro un LI, togli il bullet da quella riga
+    let node = sel.anchorNode;
+    while (node && node !== el && node.nodeType === 3) node = node.parentNode;
+    let liAncestor = null; let p = node;
+    while (p && p !== el) { if (p.tagName === 'LI') { liAncestor = p; break; } p = p.parentNode; }
+    if (liAncestor) {
+      const ul = liAncestor.parentNode;
+      const frag = document.createElement('span');
+      frag.innerHTML = liAncestor.innerHTML || '';
+      ul.replaceChild(frag, liAncestor);
+      if (ul.children.length === 0) ul.parentNode.removeChild(ul);
+      const r = document.createRange(); r.selectNodeContents(frag); r.collapse(false);
+      sel.removeAllRanges(); sel.addRange(r);
+      handleEditorHtmlChange(fi); return;
+    }
+
+    const before = el.innerHTML;
+    try { document.execCommand('insertUnorderedList'); } catch(_) {}
+    setTimeout(() => {
+      const after = el.innerHTML;
+      if (before === after) {
+        // Fallback manuale: wrappa selezione in <ul><li>
+        try {
+          const sel2 = window.getSelection();
+          if (!sel2 || sel2.rangeCount === 0) { handleEditorHtmlChange(fi); return; }
+          const range = sel2.getRangeAt(0);
+          const frag = range.cloneContents();
+          const temp = document.createElement('div'); temp.appendChild(frag);
+          const selected = temp.innerHTML.trim();
+          range.deleteContents();
+          const ul = document.createElement('ul');
+          const li = document.createElement('li');
+          li.innerHTML = selected || '<br>';
+          ul.appendChild(li);
+          range.insertNode(ul);
+          // caret alla fine del LI
+          sel2.removeAllRanges();
+          const nrange = document.createRange();
+          nrange.selectNodeContents(li);
+          nrange.collapse(false);
+          sel2.addRange(nrange);
+        } catch (_) {}
+      }
+      handleEditorHtmlChange(fi);
+    }, 0);
+  };
+
+  const sanitizeHtml = (html) => {
+    try {
+      const tmp = document.createElement('div'); tmp.innerHTML = html || '';
+      const allowed = new Set(['B','STRONG','I','EM','U','UL','OL','LI','BR','P','SPAN','DIV']);
+      const walker = (node) => {
+        const kids = Array.from(node.childNodes);
+        for (const k of kids) {
+          if (k.nodeType === 1) { // element
+            if (!allowed.has(k.tagName)) {
+              // unwrap element but keep children
+              while (k.firstChild) node.insertBefore(k.firstChild, k);
+              node.removeChild(k);
+              continue;
+            }
+            // strip attributes (except style limited)
+            const keepStyle = k.getAttribute('style');
+            k.removeAttribute('class');
+            k.removeAttribute('id');
+            for (const attr of Array.from(k.attributes)) {
+              if (attr.name.startsWith('on')) k.removeAttribute(attr.name);
+            }
+            if (keepStyle) k.setAttribute('style', keepStyle);
+            walker(k);
+          } else if (k.nodeType === 8) { // comment
+            node.removeChild(k);
+          }
+        }
+      };
+      walker(tmp);
+      return tmp.innerHTML;
+    } catch (_) { return String(html || ''); }
+  };
+
+  const handleEditorHtmlChange = (fi) => {
+    const el = editorRefs.current.get(fi); if (!el) return;
+    try {
+      el.querySelectorAll('ul').forEach(u => { u.style.listStyleType = 'disc'; u.style.paddingLeft = '1.25rem'; u.style.margin = '0.25rem 0'; });
+      el.querySelectorAll('li').forEach(li => { li.style.marginLeft = '0.25rem'; });
+    } catch(_){}
+    const safe = sanitizeHtml(el.innerHTML);
+    updateNote(fi, 'text', safe);
+  };
+  const handleEditorPaste = (e, fi) => {
+    try {
+      const html = e.clipboardData.getData('text/html');
+      const text = e.clipboardData.getData('text/plain');
+      if (html) {
+        e.preventDefault();
+        const safe = sanitizeHtml(html);
+        document.execCommand('insertHTML', false, safe);
+        handleEditorHtmlChange(fi);
+      } else if (text) {
+        e.preventDefault();
+        document.execCommand('insertText', false, text);
+        handleEditorHtmlChange(fi);
+      }
+    } catch (_) {}
+  };
+  // Context menu
+  const handleEditorContextMenu = (e, fi) => {
+    e.preventDefault();
+    setCtxMenu({ open: true, x: e.clientX, y: e.clientY, index: fi });
+  };
+  const execCmd = (cmd, fi) => {
+    const el = editorRefs.current.get(fi);
+    if (!el) return;
+    if (cmd === 'selectAll') { el.focus(); document.execCommand('selectAll'); return; }
+    if (cmd === 'copy' || cmd === 'cut') {
+      try { document.execCommand(cmd); } catch(_){}
+      return;
+    }
+    if (cmd === 'paste') {
+      // Prova prima Clipboard API, altrimenti fallback
+      const insertText = (text) => {
+        try {
+          if (!text) return;
+          el.focus();
+          if (!document.execCommand('insertText', false, text)) {
+            const sel = window.getSelection();
+            if (sel && sel.rangeCount > 0) {
+              const range = sel.getRangeAt(0);
+              range.deleteContents();
+              range.insertNode(document.createTextNode(text));
+            }
+          }
+        } catch(_) {}
+        handleEditorHtmlChange(fi);
+      };
+      try {
+        if (navigator && navigator.clipboard && navigator.clipboard.readText) {
+          navigator.clipboard.readText().then(t => insertText(t)).catch(() => { try { document.execCommand('paste'); handleEditorHtmlChange(fi); } catch(_){} });
+        } else {
+          try { document.execCommand('paste'); handleEditorHtmlChange(fi); } catch(_){}
+        }
+      } catch(_) { try { document.execCommand('paste'); handleEditorHtmlChange(fi); } catch(_){} }
+    }
+  };
+  // Gestione tag nella sidebar
+  const addSidebarTag = (raw) => {
+    const t = normTag(raw).trim();
+    if (!t) return;
+    const lowered = t.toLowerCase();
+    const exists = allTags.some(x => x.toLowerCase() === lowered);
+    if (exists) return;
+    setExtraTags(prev => [...prev, t]);
+  };
+  const deleteSidebarTag = (tag) => {
+    const t = normTag(tag);
+    const tl = t.toLowerCase();
+    setExtraTags(prev => prev.filter(x => x.toLowerCase() !== tl));
+    setNotes(prev => prev.map(n => ({
+      ...n,
+      tags: (n.tags || []).filter(x => normTag(x).toLowerCase() !== tl)
+    })));
+    if (tagFilter && normTag(tagFilter).toLowerCase().includes(tl)) setTagFilter("");
+  };
+
+  // Toolbar component (inline)
+  function EditorToolbar({ onBold, onItalic, onUnderline, onBullet }) {
+    return (
+      <div className="mb-2 flex items-center gap-2">
+        <button type="button" onClick={(e)=>{e.preventDefault(); onBold&&onBold();}} className="px-2 py-1 text-xs rounded border" style={{ borderColor: '#00000022', background: '#fff' }} title="Grassetto (Ctrl+B)"><b>B</b></button>
+        <button type="button" onClick={(e)=>{e.preventDefault(); onItalic&&onItalic();}} className="px-2 py-1 text-xs rounded border italic" style={{ borderColor: '#00000022', background: '#fff' }} title="Corsivo (Ctrl+I)">I</button>
+        <button type="button" onClick={(e)=>{e.preventDefault(); onUnderline&&onUnderline();}} className="px-2 py-1 text-xs rounded border underline" style={{ borderColor: '#00000022', background: '#fff' }} title="Sottolineato (Ctrl+U)">U</button>
+        <button type="button" onClick={(e)=>{e.preventDefault(); onBullet&&onBullet();}} className="px-2 py-1 text-xs rounded border" style={{ borderColor: '#00000022', background: '#fff' }} title="Elenco puntato (-, Tab)">• List</button>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen" style={{ backgroundColor: TOKENS.cream }}>
+    <div className="min-h-screen" style={{ backgroundColor: THEMES[theme]?.bg || TOKENS.cream }}>
       {/* Header */}
-      <div className="sticky top-0 z-[200] px-6 py-4 flex items-center justify-between border-b" style={{ borderColor: "#e5dfd2", background: TOKENS.cream }}>
+      <div className="sticky top-0 z-[200] px-6 py-4 flex items-center justify-between border-b" style={{ borderColor: "#e5dfd2", background: THEMES[theme]?.panel || TOKENS.cream }}>
         <div className="flex items-center gap-3">
           <div className="flex gap-2 mr-1">
             <span className="inline-block w-3 h-3 rounded-full" style={{ background: "#EA6E6E" }} />
@@ -458,6 +939,13 @@ function RoloMemo() {
           >
             {sound ? "🔊" : "🔇"}
           </button>
+          <button
+            onClick={() => setSettingsOpen(true)}
+            className="rounded-full w-9 h-9 grid place-items-center border"
+            style={{ borderColor: "#d4cbb7", color: TOKENS.smoke, background: "#fffaf1" }}
+            title="Impostazioni"
+            aria-label="Apri impostazioni"
+          >⚙️</button>
           <button
             onClick={addNote}
             className="px-4 py-2 rounded-full font-medium shadow"
@@ -565,7 +1053,7 @@ function RoloMemo() {
             if (!note) return null;
             return (
               <>
-                <div className="fixed inset-0 z-[1900] bg-black/30" onClick={() => setExpandedIndex(null)} />
+                <div className="fixed inset-0 z-[1900] bg-black/30" onClick={() => { setCtxMenu({open:false,x:0,y:0,index:null}); setExpandedIndex(null); }} />
                 <div
                   className="fixed z-[2000] left-1/2"
                   style={{
@@ -580,38 +1068,106 @@ function RoloMemo() {
                     style={{ background: note.color || TOKENS.cream, borderColor: TOKENS.ink }}
                     onDoubleClick={() => setExpandedIndex(null)}
                   >
+                    {/* Toolbar editor */}
+                    <EditorToolbar
+                      onBold={() => { const el = editorRefs.current.get(i); if (el) { el.focus(); document.execCommand('bold'); handleEditorHtmlChange(i); } }}
+                      onItalic={() => { const el = editorRefs.current.get(i); if (el) { el.focus(); document.execCommand('italic'); handleEditorHtmlChange(i); } }}
+                      onUnderline={() => { const el = editorRefs.current.get(i); if (el) { el.focus(); document.execCommand('underline'); handleEditorHtmlChange(i); } }}
+                      onBullet={() => toggleBulletList(i)}
+                    />
                     <input
                       value={note.title || ""}
                       onChange={e => updateNote(i, "title", e.target.value)}
                       className="w-full bg-transparent border-b font-semibold mb-3 outline-none"
                       style={{ borderColor: "#00000033", color: TOKENS.ink }}
                     />
-                    <textarea
-                      value={note.text || ""}
-                      onChange={e => updateNote(i, "text", e.target.value)}
-                      className="flex-1 bg-transparent outline-none resize-none"
-                      style={{ color: TOKENS.ink }}
+                    <div
+                      ref={el => { if (el) { editorRefs.current.set(i, el); if (el.innerHTML !== (note.text || '')) el.innerHTML = sanitizeHtml(note.text || ''); } }}
+                      contentEditable
+                      suppressContentEditableWarning
+                      onInput={() => handleEditorHtmlChange(i)}
+                      onKeyDown={e => handleEditorKeyDownRich(e, i)}
+                      onPaste={e => handleEditorPaste(e, i)}
+                      onContextMenu={e => handleEditorContextMenu(e, i)}
+                      className="flex-1 bg-transparent outline-none"
+                      style={{ color: TOKENS.ink, whiteSpace: 'pre-wrap', cursor: 'text' }}
                     />
                     <div className="mt-2 flex flex-wrap gap-2 items-center">
                       {(note.tags || []).map(t => (
-                        <span key={t} className="px-2 py-0.5 rounded-full text-xs" style={{ background: "#ffffff88", color: TOKENS.smoke, border: "1px solid #00000022" }}>
-                          #{t}
+                        <span key={t} className="px-2 py-0.5 rounded-full text-xs flex items-center gap-1" style={{ background: "#ffffff88", color: TOKENS.smoke, border: "1px solid #00000022" }}>
+                          <span>#{t}</span>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); const tl = String(t); const gi = filteredIndexToGlobal(i); if (gi!=null) setNotes(prev => prev.map((n,k)=> k===gi ? { ...n, tags: (n.tags||[]).filter(x=> normTag(x).toLowerCase() !== normTag(tl).toLowerCase()) } : n)); }}
+                            className="w-4 h-4 grid place-items-center rounded-full border"
+                            style={{ borderColor: "#00000022", color: "#8b1a1a" }}
+                            title="Rimuovi tag"
+                          >×</button>
                         </span>
                       ))}
-                      {/* input aggiungi tag spostato accanto ai tag esistenti */}
-                      <input
-                        type="text"
-                        placeholder="aggiungi tag"
-                        onClick={e => e.stopPropagation()}
-                        onKeyDown={e => {
-                          if (e.key === "Enter") {
-                            addTagToNote(i, e.currentTarget.value);
-                            e.currentTarget.value = "";
-                          }
-                        }}
-                        className="px-2 py-1 text-xs rounded border bg-white/70 inline-block"
-                        style={{ borderColor: "#00000022", color: TOKENS.smoke, width: 120 }}
-                      />
+                      {/* input tag con suggerimenti */}
+                      <div className="relative inline-block">
+                        <input
+                          ref={tagInputRef}
+                          type="text"
+                          placeholder="aggiungi tag"
+                          value={tagQuery}
+                          onChange={(e)=>{ setTagQuery(e.target.value); setTagSuggestOpen(true); updateTagSuggestPos(); }}
+                          onFocus={()=> { setTagSuggestOpen(true); updateTagSuggestPos(); }}
+                          onClick={e => e.stopPropagation()}
+                          onBlur={()=> { tagSuggestCloseTimer.current = setTimeout(()=> setTagSuggestOpen(false), 120); }}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              const q = normTag(tagQuery);
+                              const existing = allTags.find(t => eqTag(t, q));
+                              const current = (note.tags||[]).map(x=>normTag(x).toLowerCase());
+                              if (existing) {
+                                if (!current.includes(normTag(existing).toLowerCase())) addTagToNote(i, existing);
+                              } else if (q) {
+                                addTagToNote(i, q);
+                              }
+                              setTagQuery('');
+                              setTagSuggestOpen(false);
+                            }
+                          }}
+                          className="px-2 py-1 text-xs rounded border bg-white/70 inline-block"
+                          style={{ borderColor: "#00000022", color: TOKENS.smoke, width: 160 }}
+                        />
+                        {tagSuggestOpen && ReactDOM.createPortal((
+                          <div
+                            className="rounded border bg-white shadow"
+                            style={{ position: 'fixed', left: tagSuggestPos.x, top: tagSuggestPos.y + 2, minWidth: Math.max(160, tagSuggestPos.w), maxHeight: '11rem', overflow: 'auto', zIndex: 2200, borderColor: '#e5dfd2' }}
+                            onMouseDown={(e)=>{ if (tagSuggestCloseTimer.current) { clearTimeout(tagSuggestCloseTimer.current); tagSuggestCloseTimer.current=null; } e.preventDefault(); }}
+                          >
+                            {(() => {
+                              const q = normTag(tagQuery);
+                              const cur = (note.tags||[]).map(x=> normTag(x).toLowerCase());
+                              const matches = allTags.filter(t => t.toLowerCase().includes(q.toLowerCase()) && !cur.includes(normTag(t).toLowerCase())).slice(0, 8);
+                              const exact = allTags.some(t => eqTag(t, q));
+                              const items = [...matches];
+                              if (q && !exact) items.push(`+ aggiungi "${q}"`);
+                              if (items.length === 0) return (
+                                <div className="px-3 py-2 text-xs" style={{ color: TOKENS.smoke }}>Nessun suggerimento</div>
+                              );
+                              return items.map((it, idx) => (
+                                <button key={idx}
+                                  className="block w-full text-left px-3 py-2 text-sm hover:bg-gray-100"
+                                  onClick={() => {
+                                    const q2 = normTag(tagQuery);
+                                    if (it.startsWith('+ aggiungi')) {
+                                      if (q2) addTagToNote(i, q2);
+                                    } else {
+                                      addTagToNote(i, it);
+                                    }
+                                    setTagQuery(''); setTagSuggestOpen(false);
+                                    if (tagInputRef.current) try { tagInputRef.current.focus(); } catch(_){}
+                                  }}
+                                >{it}</button>
+                              ));
+                            })()}
+                          </div>
+                        ), document.body)}
+                      </div>
                     </div>
 
                     <div className="mt-3 flex items-center justify-between gap-2">
@@ -625,19 +1181,12 @@ function RoloMemo() {
                             title={"Colore " + col}
                           />
                         ))}
-                        <input
-                          type="text"
-                          placeholder="#A1B2C3"
-                          onClick={e => e.stopPropagation()}
-                          onKeyDown={e => {
-                            if (e.key === "Enter") {
-                              addCustomHexToPalette(e.currentTarget.value);
-                              e.currentTarget.value = "";
-                            }
-                          }}
-                          className="w-24 px-2 py-1 text-xs rounded border bg-white/70"
-                          style={{ borderColor: "#00000022", color: TOKENS.smoke }}
-                        />
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setSettingsOpen(true); }}
+                          className="px-2 py-1 rounded border text-xs"
+                          style={{ borderColor: "#00000022", color: TOKENS.smoke, background: "#fff" }}
+                          title="Gestisci palette in Impostazioni"
+                        >🎨 Palette</button>
                       </div>
                       <div>
                         <button
@@ -651,6 +1200,23 @@ function RoloMemo() {
                       </div>
                     </div>
                   </div>
+                  {/* Context menu editor dentro l'overlay */}
+                  {ctxMenu.open && ctxMenu.index === i && (
+                    <div
+                      className="fixed bg-white rounded border shadow text-sm"
+                      style={{ left: ctxMenu.x + 2, top: ctxMenu.y + 2, borderColor: '#e5dfd2', zIndex: 2147483647 }}
+                      onClick={(e)=> e.stopPropagation()}
+                      onContextMenu={(e)=> { e.preventDefault(); e.stopPropagation(); }}
+                    >
+                      {['Copia','Taglia','Incolla','Seleziona tutto'].map((label, idx) => (
+                        <button
+                          key={idx}
+                          className="block w-40 text-left px-3 py-2 hover:bg-gray-100"
+                          onClick={() => { const map={ 'Copia':'copy','Taglia':'cut','Incolla':'paste','Seleziona tutto':'selectAll'}; execCmd(map[label], ctxMenu.index); setCtxMenu({open:false,x:0,y:0,index:null}); }}
+                        >{label}</button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </>
             );
@@ -687,6 +1253,33 @@ function RoloMemo() {
             </div>
           </div>
           <div className="text-sm font-semibold mb-2" style={{ color: TOKENS.ink }}>Tag</div>
+          <div className="flex gap-2 mb-2">
+            <input
+              type="text"
+              placeholder="nuovo tag"
+              className="flex-1 px-2 py-1 text-sm rounded border bg-white/70"
+              style={{ borderColor: "#e5dfd2", color: TOKENS.smoke }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  addSidebarTag(e.currentTarget.value);
+                  e.currentTarget.value = '';
+                }
+              }}
+            />
+            <button
+              onClick={(e) => {
+                const input = e.currentTarget.previousElementSibling;
+                if (input && input.value) {
+                  addSidebarTag(input.value);
+                  input.value = '';
+                }
+              }}
+              className="px-3 py-1 rounded border text-sm"
+              style={{ borderColor: "#e5dfd2", background: "#fffaf1", color: TOKENS.smoke }}
+              title="Aggiungi tag"
+            >+
+            </button>
+          </div>
           <button
             onClick={() => setTagFilter("")}
             className={`w-full text-left px-3 py-2 rounded border mb-2 ${tagFilter ? "" : "font-semibold"}`}
@@ -699,15 +1292,23 @@ function RoloMemo() {
               const count = tagCounts.get(tag.toLowerCase()) || 0;
               const active = tagFilter && normTag(tagFilter).toLowerCase().includes(tag.toLowerCase());
               return (
-                <button
-                  key={tag}
-                  onClick={() => setTagFilter(active ? "" : tag)}
-                  className={`w-full text-left px-3 py-2 rounded border text-sm ${active ? "font-semibold" : ""}`}
-                  style={{ borderColor: "#e5dfd2", background: active ? TOKENS.mustard : "transparent", color: active ? "#fff" : TOKENS.smoke }}
-                >
-                  #{tag}
-                  <span className="float-right opacity-70">{count}</span>
-                </button>
+                <div key={tag} className="flex items-center gap-2">
+                  <button
+                    onClick={() => setTagFilter(active ? "" : tag)}
+                    className={`flex-1 text-left px-3 py-2 rounded border text-sm ${active ? "font-semibold" : ""}`}
+                    style={{ borderColor: "#e5dfd2", background: active ? TOKENS.mustard : "transparent", color: active ? "#fff" : TOKENS.smoke }}
+                  >
+                    #{tag}
+                    <span className="float-right opacity-70">{count}</span>
+                  </button>
+                  <button
+                    onClick={() => deleteSidebarTag(tag)}
+                    className="w-8 h-8 rounded border grid place-items-center text-sm"
+                    style={{ borderColor: "#e5dfd2", background: "#fffaf1", color: "#8b1a1a" }}
+                    title="Elimina tag"
+                    aria-label={`Elimina tag ${tag}`}
+                  >×</button>
+                </div>
               );
             })}
           </div>
@@ -739,6 +1340,33 @@ function RoloMemo() {
               </div>
 
               <div className="text-sm font-semibold mb-2" style={{ color: TOKENS.ink }}>Tag</div>
+              <div className="flex gap-2 mb-2">
+                <input
+                  type="text"
+                  placeholder="nuovo tag"
+                  className="flex-1 px-2 py-1 text-sm rounded border bg-white/70"
+                  style={{ borderColor: "#e5dfd2", color: TOKENS.smoke }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      addSidebarTag(e.currentTarget.value);
+                      e.currentTarget.value = '';
+                    }
+                  }}
+                />
+                <button
+                  onClick={(e) => {
+                    const input = e.currentTarget.previousElementSibling;
+                    if (input && input.value) {
+                      addSidebarTag(input.value);
+                      input.value = '';
+                    }
+                  }}
+                  className="px-3 py-1 rounded border text-sm"
+                  style={{ borderColor: "#e5dfd2", background: "#fffaf1", color: TOKENS.smoke }}
+                  title="Aggiungi tag"
+                >+
+                </button>
+              </div>
               <button
                 onClick={() => { setTagFilter(""); setMenuOpen(false); }}
                 className={`w-full text-left px-3 py-2 rounded border mb-2 ${tagFilter ? "" : "font-semibold"}`}
@@ -752,22 +1380,194 @@ function RoloMemo() {
                   const count = tagCounts.get(tag.toLowerCase()) || 0;
                   const active = tagFilter && normTag(tagFilter).toLowerCase().includes(tag.toLowerCase());
                   return (
-                    <button
-                      key={tag}
-                      onClick={() => { setTagFilter(active ? "" : tag); setMenuOpen(false); }}
-                      className={`w-full text-left px-3 py-2 rounded border text-sm ${active ? "font-semibold" : ""}`}
-                      style={{ borderColor: "#e5dfd2", background: active ? TOKENS.mustard : "transparent", color: active ? "#fff" : TOKENS.smoke }}
-                    >
-                      #{tag}
-                      <span className="float-right opacity-70">{count}</span>
-                    </button>
+                    <div key={tag} className="flex items-center gap-2">
+                      <button
+                        onClick={() => { setTagFilter(active ? "" : tag); setMenuOpen(false); }}
+                        className={`flex-1 text-left px-3 py-2 rounded border text-sm ${active ? "font-semibold" : ""}`}
+                        style={{ borderColor: "#e5dfd2", background: active ? TOKENS.mustard : "transparent", color: active ? "#fff" : TOKENS.smoke }}
+                      >
+                        #{tag}
+                        <span className="float-right opacity-70">{count}</span>
+                      </button>
+                      <button
+                        onClick={() => deleteSidebarTag(tag)}
+                        className="w-8 h-8 rounded border grid place-items-center text-sm"
+                        style={{ borderColor: "#e5dfd2", background: "#fffaf1", color: "#8b1a1a" }}
+                        title="Elimina tag"
+                        aria-label={`Elimina tag ${tag}`}
+                      >×</button>
+                    </div>
                   );
                 })}
               </div>
             </div>
           </>
         )}
+
+        {/* Context menu editor (duplicato rimosso: la versione corretta è dentro l'overlay espanso) */}
+
+        {settingsOpen && (
+          <div
+            className="fixed inset-0 z-[2000]"
+            onMouseDown={(e) => { if (e.target === e.currentTarget) setSettingsOpen(false); }}
+          >
+            <div className="absolute inset-0 bg-black/40" />
+            <div
+              className="absolute left-1/2 top-24 -translate-x-1/2 w-[min(740px,92vw)] max-h-[70vh] rounded-2xl border shadow-lg overflow-hidden"
+              style={{ borderColor: '#e5dfd2', background: '#fffaf1' }}
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="px-4 py-3 border-b flex items-center justify-between" style={{ borderColor: '#e5dfd2' }}>
+                <div className="font-semibold" style={{ color: TOKENS.ink }}>Impostazioni</div>
+                <button
+                  type="button"
+                  onClick={() => setSettingsOpen(false)}
+                  className="w-8 h-8 grid place-items-center rounded border"
+                  style={{ borderColor: '#e5dfd2', background: '#fff', color: TOKENS.smoke }}>×</button>
+              </div>
+              <div className="p-4 overflow-auto" style={{ maxHeight: '60vh' }}>
+                {cfgLoading ? (
+                  <div className="text-sm" style={{ color: TOKENS.smoke }}>Caricamento impostazioni…</div>
+                ) : (
+                  <>
+                    {cfgError && (
+                      <div className="mb-3 text-sm" style={{ color: '#8b1a1a' }}>Errore: {String(cfgError)}</div>
+                    )}
+
+                    <div className="mb-4">
+                      <div className="text-xs uppercase tracking-wider mb-2" style={{ color: TOKENS.smoke }}>Tema</div>
+                      <div className="flex items-center gap-2">
+                        {['retro','dark','zen'].map(t => (
+                          <button key={t}
+                            type="button"
+                            onClick={(e) => { e.preventDefault(); e.stopPropagation();
+                              const prev = theme;
+                              setTheme(t);
+                              updateConfigPart({ app: { theme: t } });
+                              if (!useCustomPalette) {
+                                const oldP = themeDefaultPalette(prev);
+                                const newP = themeDefaultPalette(t);
+                                // Mappa i colori delle note dal vecchio tema al nuovo (per indice)
+                                setNotes(prevNotes => prevNotes.map(n => {
+                                  const idx = oldP.indexOf(n.color);
+                                  if (idx >= 0 && idx < newP.length) return { ...n, color: newP[idx] };
+                                  return n;
+                                }));
+                                setPalette(newP);
+                              }
+                            }}
+                            className={`px-3 py-1 rounded border text-sm ${theme === t ? 'font-semibold' : ''}`}
+                            style={{ borderColor: '#e5dfd2', background: theme === t ? (THEMES[theme]?.mustard || '#d6a516') : '#fff', color: theme === t ? '#fff' : TOKENS.smoke }}
+                          >{t.charAt(0).toUpperCase()+t.slice(1)}</button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="mb-4">
+                      <div className="text-xs uppercase tracking-wider mb-2" style={{ color: TOKENS.smoke }}>Generale</div>
+                      <div className="flex items-center justify-between gap-3 rounded border px-3 py-2"
+                           style={{ borderColor: '#e5dfd2', background: '#fff' }}>
+                        <div className="text-sm" style={{ color: TOKENS.ink }}>Modalità debug</div>
+                        <button type="button"
+                          onClick={(e) => { e.preventDefault(); e.stopPropagation();
+                            const current = !!(appConfig && appConfig.app && appConfig.app.debug);
+                            updateConfigPart({ app: { debug: !current } });
+                          }}
+                          className={`px-3 py-1 rounded border text-sm ${appConfig?.app?.debug ? 'font-semibold' : ''}`}
+                          style={{ borderColor: '#e5dfd2', background: appConfig?.app?.debug ? TOKENS.mustard : '#fff', color: appConfig?.app?.debug ? '#fff' : TOKENS.smoke }}
+                        >
+                          {appConfig?.app?.debug ? 'ON' : 'OFF'}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="mb-4">
+                      <div className="text-xs uppercase tracking-wider mb-2" style={{ color: TOKENS.smoke }}>Sistema</div>
+                      <div className="rounded border px-3 py-2 text-sm flex items-center justify-between gap-3" style={{ borderColor: '#e5dfd2', background: '#fff' }}>
+                        <div>
+                          <div style={{ color: TOKENS.ink }}>Avvia all’avvio di Windows</div>
+                          {!!autoStartError && (
+                            <div className="text-xs mt-1" style={{ color: '#8b1a1a' }}>{autoStartError}</div>
+                          )}
+                        </div>
+                        <button type="button"
+                          disabled={autoStartBusy}
+                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); setAutoStartEnabled(!(!!autoStart)); }}
+                          className={`px-3 py-1 rounded border text-sm ${autoStart ? 'font-semibold' : ''}`}
+                          style={{ borderColor: '#e5dfd2', background: autoStart ? TOKENS.mustard : '#fff', color: autoStart ? '#fff' : TOKENS.smoke, opacity: autoStartBusy ? 0.6 : 1 }}
+                        >
+                          {autoStart ? 'ON' : 'OFF'}
+                        </button>
+                      </div>
+                      <div className="mt-2 flex gap-2">
+                        <button
+                          type="button"
+                          className="px-3 py-1 rounded border text-sm"
+                          style={{ borderColor: '#e5dfd2', background: '#fff', color: TOKENS.smoke }}
+                          onClick={async (e)=>{ e.preventDefault(); e.stopPropagation(); try{ await waitForPywebviewApi(1000); const res = await window.pywebview.api.restore_last_backup(); if(!res?.ok){ alert('Nessun backup da ripristinare: '+(res?.error||'')); } else { alert('Backup ripristinato. Riavvia l\'app.'); } } catch(err){ alert('Errore ripristino: '+err); } }}
+                        >Ripristina ultimo backup</button>
+                      </div>
+                    </div>
+
+                    <div className="mb-4">
+                      <div className="text-xs uppercase tracking-wider mb-2" style={{ color: TOKENS.smoke }}>Palette schede</div>
+                      <div className="rounded border p-3" style={{ borderColor: '#e5dfd2', background: '#fff' }}>
+                        <div className="flex items-center justify-between mb-2">
+                          <label className="text-sm" style={{ color: TOKENS.ink }}>
+                            <input type="checkbox" className="mr-2"
+                                   checked={useCustomPalette}
+                                   onChange={(e) => {
+                                     const on = e.currentTarget.checked;
+                                     setUseCustomPalette(on);
+                                     if (!on) setPalette(themeDefaultPalette(theme));
+                                   }} />
+                            Usa palette personalizzata
+                          </label>
+                          {!useCustomPalette && (
+                            <button type="button" className="px-2 py-1 text-xs rounded border" style={{ borderColor: '#e5dfd2', color: TOKENS.smoke }} onClick={() => setPalette(themeDefaultPalette(theme))}>Reimposta</button>
+                          )}
+                        </div>
+                        <div className="flex flex-wrap gap-2 mb-2">
+                          {palette.map(col => (
+                            <button key={col} type="button" className="w-6 h-6 rounded-full border" style={{ background: col, borderColor: '#00000022' }}
+                              onClick={(e) => e.preventDefault()}
+                              onContextMenu={(e) => { e.preventDefault(); if (!useCustomPalette) return; setPalette(p => p.filter(c => c !== col)); }}
+                              title={useCustomPalette ? 'Click destro per rimuovere' : 'Palette tema'}
+                            />
+                          ))}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <input type="text" placeholder="#A1B2C3" className="w-28 px-2 py-1 text-xs rounded border bg-white/70"
+                                 style={{ borderColor: '#e5dfd2', color: TOKENS.smoke }}
+                                 disabled={!useCustomPalette}
+                                 onKeyDown={(e) => {
+                                   if (e.key === 'Enter' && useCustomPalette) {
+                                     let s = String(e.currentTarget.value||'').trim();
+                                     if (!s) return; if (s[0] !== '#') s = '#'+s; s = s.replace(/[^#0-9a-fA-F]/g,'');
+                                     if (!/^#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$/.test(s)) return;
+                                     if (!palette.includes(s)) setPalette(p => [...p, s]);
+                                     e.currentTarget.value='';
+                                   }
+                                 }} />
+                          <span className="text-xs" style={{ color: TOKENS.smoke }}>Invio per aggiungere</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mb-2 text-xs" style={{ color: TOKENS.smoke }}>
+                      Dati: {appConfig ? 'caricati' : 'default'} • Versione UI locale
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
 }
+
+
+
