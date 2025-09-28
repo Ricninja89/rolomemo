@@ -39,7 +39,7 @@ BASE_DIR = resource_path("")
 # ========== CONFIGURAZIONE ==========
 
 APP_NAME = "RoloMemo"
-APP_VERSION = "1.0.2"
+APP_VERSION = "1.0.3"
 DATA_DIR_NAME = "rolomemo"
 
 def _user_data_base() -> Path:

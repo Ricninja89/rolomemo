@@ -1,6 +1,6 @@
 #define MyAppName "RoloMemo"
 #ifndef MyAppVersion
-#define MyAppVersion "1.0.2"
+#define MyAppVersion "1.0.3"
 #endif
 #define MyAppPublisher "RoloMemo Team"
 #define MyAppURL "https://github.com/Ricninja89/rolomemo"
