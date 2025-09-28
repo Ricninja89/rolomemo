@@ -792,7 +792,7 @@ function RoloMemo() {
   const sanitizeHtml = (html) => {
     try {
       const tmp = document.createElement('div'); tmp.innerHTML = html || '';
-      const allowed = new Set(['B','STRONG','I','EM','U','UL','OL','LI','BR','P','SPAN','DIV']);
+      const allowed = new Set(['B','STRONG','I','EM','U','UL','OL','LI','BR','P','SPAN','DIV','CODE']);
       const walker = (node) => {
         const kids = Array.from(node.childNodes);
         for (const k of kids) {
@@ -820,6 +820,168 @@ function RoloMemo() {
       walker(tmp);
       return tmp.innerHTML;
     } catch (_) { return String(html || ''); }
+  };
+
+  const escapeHtml = (text) => {
+    try {
+      const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+      return String(text || '').replace(/[&<>"']/g, (c) => map[c]);
+    } catch(_) { return String(text || ''); }
+  };
+
+  // Preview sicura e leggibile nelle card a partire dal contenuto HTML della nota
+  const makePreviewHtml = (src) => {
+    try {
+      const hasTags = typeof src === 'string' && src.indexOf('<') !== -1 && src.indexOf('>') !== -1;
+      const base = hasTags ? sanitizeHtml(src) : escapeHtml(src).replace(/\n/g, '<br>');
+      const tmp = document.createElement('div');
+      tmp.innerHTML = base;
+
+      // Liste → righe con bullet, preservando markup inline
+      tmp.querySelectorAll('ul, ol').forEach(list => {
+        const isOl = list.tagName === 'OL';
+        const frag = document.createDocumentFragment();
+        let idx = 1;
+        const items = Array.from(list.children).filter(ch => ch.tagName === 'LI');
+        items.forEach(li => {
+          const line = document.createElement('span');
+          const bullet = isOl ? (idx++ + '. ') : '• ';
+          line.appendChild(document.createTextNode(bullet));
+          const inner = document.createElement('span');
+          inner.innerHTML = sanitizeHtml(li.innerHTML);
+          Array.from(inner.childNodes).forEach(n => line.appendChild(n));
+          frag.appendChild(line);
+          frag.appendChild(document.createElement('br'));
+        });
+        list.replaceWith(frag);
+      });
+
+      // Unwrap P/DIV mantenendo interruzioni di riga
+      tmp.querySelectorAll('p, div').forEach(el => {
+        const frag = document.createDocumentFragment();
+        while (el.firstChild) frag.appendChild(el.firstChild);
+        const br = document.createElement('br');
+        const hasSibling = !!el.nextSibling;
+        el.replaceWith(frag);
+        if (hasSibling) tmp.appendChild(br);
+      });
+
+      // Rimuovi attributi di presentazione residui per sicurezza della preview
+      tmp.querySelectorAll('*').forEach(node => {
+        if (node.nodeType === 1) {
+          node.removeAttribute('style');
+          node.removeAttribute('class');
+          node.removeAttribute('id');
+          Array.from(node.attributes).forEach(a => { if (a.name.startsWith('on')) node.removeAttribute(a.name); });
+        }
+      });
+
+      // Normalizza BR multipli e whitespace
+      let html = tmp.innerHTML
+        .replace(/(<br\s*\/?>(\s|&nbsp;)*){3,}/gi, '<br><br>')
+        .replace(/\n+/g, ' ')
+        .trim();
+
+      // Hard limit: caratteri e interruzioni per assicurare altezza costante
+      const MAX_CHARS = 320;
+      const MAX_BREAKS = 2; // al massimo 3 righe totali
+
+      // Limita i <br> a MAX_BREAKS
+      const parts = html.split(/<br\s*\/?>(?:\s|&nbsp;)*?/i);
+      if (parts.length > MAX_BREAKS + 1) {
+        html = parts.slice(0, MAX_BREAKS + 1).join('<br>') + ' ' + parts.slice(MAX_BREAKS + 1).join(' ');
+      }
+
+      // Se eccede in caratteri, fallback a testo semplice troncato + ellissi (mantiene clamp visivo)
+      const plain = tmp.textContent.replace(/\s+/g, ' ').trim();
+      if (plain.length > MAX_CHARS) {
+        return escapeHtml(plain.slice(0, MAX_CHARS).trim()) + '&hellip;';
+      }
+
+      return html;
+    } catch(_) {
+      return escapeHtml(src || '');
+    }
+  };
+
+  // ------ Allegati ------
+  const getAttachments = (note) => {
+    const arr = Array.isArray(note?.attachments) ? note.attachments : [];
+    return arr.filter(a => a && (a.url || a.path || a.href));
+  };
+  const attachmentCount = (note) => getAttachments(note).length;
+  const attDisplayName = (att) => {
+    const n = att?.name || '';
+    const u = att?.url || att?.path || att?.href || '';
+    if (n) return String(n);
+    try { const p = u.split(/[\\/]/).pop(); return p || u; } catch(_) { return String(u||'allegato'); }
+  };
+  const attKind = (att) => {
+    const u = (att?.mime || '').toLowerCase() || String(att?.url||att?.path||att?.href||'').toLowerCase();
+    if (/(\.png|\.jpe?g|\.gif|\.webp|\.bmp)$/.test(u) || /image\//.test(u)) return 'image';
+    if (/(\.mp4|\.webm|\.mkv|\.mov)$/.test(u) || /video\//.test(u)) return 'video';
+    if (/(\.mp3|\.wav|\.ogg|\.m4a)$/.test(u) || /audio\//.test(u)) return 'audio';
+    if (/\.pdf$/.test(u) || /application\/pdf/.test(u)) return 'pdf';
+    return 'file';
+  };
+  const [previewAtt, setPreviewAtt] = useState(null);
+  const openAttachment = async (att) => {
+    try {
+      const kind = attKind(att);
+      const url = att?.url || att?.path || att?.href;
+      if (!url) return;
+      if (kind === 'image' || kind === 'video' || kind === 'audio' || kind === 'pdf') {
+        setPreviewAtt({ ...att, kind, url });
+        return;
+      }
+      if (window.pywebview?.api?.open_path) {
+        await window.pywebview.api.open_path(url);
+      } else {
+        window.open(url, '_blank');
+      }
+    } catch(_) {}
+  };
+
+  const guessMimeFromPath = (p) => {
+    const low = String(p || '').toLowerCase();
+    if (low.match(/\.(png|jpe?g|gif|webp|bmp)$/)) return 'image/*';
+    if (low.match(/\.(mp4|webm|mkv|mov)$/)) return 'video/*';
+    if (low.match(/\.(mp3|wav|ogg|m4a)$/)) return 'audio/*';
+    return 'application/octet-stream';
+  };
+  const addAttachmentsToNote = async (fi) => {
+    try {
+      if (!window.pywebview?.api?.pick_attachments) return;
+      const res = await window.pywebview.api.pick_attachments();
+      if (!res || !res.ok) return;
+      const files = Array.isArray(res.files) ? res.files : [];
+      if (files.length === 0) return;
+      const idx = filteredIndexToGlobal(fi);
+      if (idx == null) return;
+      // Assicura un id stabile per la nota
+      let noteId = notes[idx]?.id;
+      if (!noteId) {
+        noteId = 'n_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7);
+        setNotes(prev => prev.map((n, k) => (k === idx ? { ...n, id: noteId } : n)));
+      }
+      // Copia i file nel vault allegati appdata
+      if (window.pywebview?.api?.copy_attachments) {
+        const copyRes = await window.pywebview.api.copy_attachments(noteId, files);
+        if (copyRes && copyRes.ok && Array.isArray(copyRes.items)) {
+          const add = copyRes.items.map(it => ({ name: it.name, path: it.path, url: it.url, mime: it.mime }));
+          setNotes(prev => prev.map((n, k) => (k === idx ? { ...n, attachments: [...(n.attachments || []), ...add] } : n)));
+          return;
+        }
+      }
+      // Fallback: linka direttamente ai path scelti
+      const add = files.map(fp => ({ name: fp.split(/[/\\]/).pop(), path: fp, url: fp, mime: guessMimeFromPath(fp) }));
+      setNotes(prev => prev.map((n, k) => (k === idx ? { ...n, attachments: [...(n.attachments || []), ...add] } : n)));
+    } catch(_) {}
+  };
+  const removeAttachmentFromNote = (fi, attIndex) => {
+    const idx = filteredIndexToGlobal(fi);
+    if (idx == null) return;
+    setNotes(prev => prev.map((n, k) => (k === idx ? { ...n, attachments: (n.attachments || []).filter((_, j) => j !== attIndex) } : n)));
   };
 
   const handleEditorHtmlChange = (fi) => {
@@ -1012,13 +1174,19 @@ function RoloMemo() {
                     }}
                   >
                     <div className="font-bold mb-2" style={{ color: TOKENS.ink }}>{note.title || "Senza titolo"}</div>
-                    <div className="line-clamp-3" style={{ color: TOKENS.ink }}>{note.text || "…"}</div>
+                    <div className="line-clamp-3" style={{ color: TOKENS.ink }} dangerouslySetInnerHTML={{ __html: makePreviewHtml(note.text || '') || '&hellip;' }} />
                     <div className="mt-2 flex flex-wrap gap-2">
                       {(note.tags || []).map(t => (
                         <span key={t} className="px-2 py-0.5 rounded-full text-xs" style={{ background: "#ffffff88", color: TOKENS.smoke, border: "1px solid #00000022" }}>
                           #{t}
                         </span>
                       ))}
+                      {attachmentCount(note) > 0 && (
+                        <span className="ml-auto px-2 py-0.5 rounded-full text-xs flex items-center gap-1" style={{ background: "#ffffff88", color: TOKENS.smoke, border: "1px solid #00000022" }} title="Allegati">
+                          <span>📎</span>
+                          <span>{attachmentCount(note)}</span>
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -1034,11 +1202,17 @@ function RoloMemo() {
                   onClick={() => setCurrentIndex(i)}
                   onDoubleClick={() => setExpandedIndex(i)}>
                   <div className="font-bold mb-2" style={{ color: TOKENS.ink }}>{note.title || "Senza titolo"}</div>
-                  <div className="line-clamp-3 mb-2" style={{ color: TOKENS.ink }}>{note.text || "…"}</div>
+                  <div className="line-clamp-3 mb-2" style={{ color: TOKENS.ink }} dangerouslySetInnerHTML={{ __html: makePreviewHtml(note.text || '') || '&hellip;' }} />
                   <div className="mt-1 flex flex-wrap gap-2">
                     {(note.tags || []).map(t => (
                       <span key={t} className="px-2 py-0.5 rounded-full text-xs" style={{ background: "#ffffff88", color: TOKENS.smoke, border: "1px solid #00000022" }}>#{t}</span>
                     ))}
+                    {attachmentCount(note) > 0 && (
+                      <span className="ml-auto px-2 py-0.5 rounded-full text-xs flex items-center gap-1" style={{ background: "#ffffff88", color: TOKENS.smoke, border: "1px solid #00000022" }} title="Allegati">
+                        <span>📎</span>
+                        <span>{attachmentCount(note)}</span>
+                      </span>
+                    )}
                   </div>
                 </div>
               ))}
@@ -1092,6 +1266,35 @@ function RoloMemo() {
                       className="flex-1 bg-transparent outline-none"
                       style={{ color: TOKENS.ink, whiteSpace: 'pre-wrap', cursor: 'text' }}
                     />
+                    <div className="mt-3">
+                      <div className="flex items-center justify-between">
+                        <div className="text-xs" style={{ color: TOKENS.smoke }}>Allegati ({attachmentCount(note)})</div>
+                        <div>
+                          <button className="px-2 py-1 rounded border text-xs" style={{ borderColor: '#00000022', color: TOKENS.smoke, background: '#fff' }} onClick={(e) => { e.stopPropagation(); addAttachmentsToNote(i); }}>
+                            + Aggiungi allegato
+                          </button>
+                        </div>
+                      </div>
+                      {getAttachments(note).length > 0 && (
+                        <ul className="pl-5 mt-1" style={{ listStyleType: 'disc' }}>
+                          {getAttachments(note).map((att, idx) => (
+                            <li key={idx} className="mb-1 flex items-center gap-2">
+                              <button
+                                className="underline text-sm"
+                                style={{ color: TOKENS.ink }}
+                                onClick={(e) => { e.stopPropagation(); openAttachment(att); }}
+                                title={attDisplayName(att)}
+                              >
+                                {attKind(att) === 'image' ? '🖼️' : attKind(att) === 'video' ? '🎞️' : attKind(att) === 'audio' ? '🎵' : attKind(att) === 'pdf' ? '📄' : '📎'}{' '}
+                                {attDisplayName(att)}
+                              </button>
+                              <button className="text-xs rounded border px-1" style={{ borderColor: '#e5dfd2' }} title="Scarica" onClick={async (e) => { e.stopPropagation(); try { await window.pywebview?.api?.save_attachment?.(att.path || att.url, attDisplayName(att)); } catch(_){} }}>⬇</button>
+                              <button className="text-xs rounded border px-1" style={{ borderColor: '#e5dfd2', color: '#8b1a1a' }} onClick={(e) => { e.stopPropagation(); removeAttachmentFromNote(i, idx); }} title="Rimuovi">✕</button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
                     <div className="mt-2 flex flex-wrap gap-2 items-center">
                       {(note.tags || []).map(t => (
                         <span key={t} className="px-2 py-0.5 rounded-full text-xs flex items-center gap-1" style={{ background: "#ffffff88", color: TOKENS.smoke, border: "1px solid #00000022" }}>
@@ -1216,7 +1419,78 @@ function RoloMemo() {
                         >{label}</button>
                       ))}
                     </div>
+          )}
+
+          {previewAtt && ReactDOM.createPortal((
+            <div className="fixed inset-0" style={{ background: 'rgba(0,0,0,0.4)', zIndex: 99999 }} onClick={() => setPreviewAtt(null)}>
+              <div className="absolute left-1/2 top-1/2 rounded-xl shadow-lg border overflow-hidden"
+                   style={{ transform: 'translate(-50%, -50%)', width: 'min(820px, 92vw)', maxHeight: '80vh', background: '#fff', borderColor: '#e5dfd2', zIndex: 100000 }}
+                   onClick={e => e.stopPropagation()}>
+                <div className="flex items-center justify-between px-3 py-2" style={{ borderBottom: '1px solid #e5dfd2', background: '#fffaf1', color: TOKENS.smoke }}>
+                  <div className="text-sm font-medium truncate">Anteprima · {attDisplayName(previewAtt)}</div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      className="px-2 py-1 rounded border text-xs"
+                      style={{ borderColor: '#e5dfd2' }}
+                      title="Scarica"
+                      onClick={async () => {
+                        try {
+                          const src = previewAtt?.path || previewAtt?.url;
+                          if (!src) return;
+                          await window.pywebview?.api?.save_attachment?.(src, attDisplayName(previewAtt));
+                        } catch(_) {}
+                      }}
+                    >
+                      ⬇ Scarica
+                    </button>
+                    <button className="px-2 py-1 rounded border text-xs" style={{ borderColor: '#e5dfd2' }} onClick={() => setPreviewAtt(null)}>Chiudi</button>
+                  </div>
+                </div>
+                <div className="p-3" style={{ background: '#fff' }}>
+                  {previewAtt.kind === 'image' && (
+                    <img src={previewAtt.url} alt={attDisplayName(previewAtt)} style={{ maxWidth: '100%', maxHeight: '70vh', display: 'block', margin: '0 auto' }} />
                   )}
+                  {previewAtt.kind === 'video' && (
+                    <video src={previewAtt.url} controls style={{ width: '100%', maxHeight: '70vh' }} />
+                  )}
+                  {previewAtt.kind === 'audio' && (
+                    <audio src={previewAtt.url} controls style={{ width: '100%' }} />
+                  )}
+                  {previewAtt.kind === 'pdf' && (
+                    <div style={{ width: '100%', height: '70vh' }}>
+                      <object data={previewAtt.url} type="application/pdf" style={{ width: '100%', height: '100%' }}>
+                        <embed src={previewAtt.url} type="application/pdf" style={{ width: '100%', height: '100%' }} />
+                        <div className="text-sm" style={{ color: TOKENS.smoke }}>
+                          Anteprima PDF non disponibile. Apri con l'app di sistema?
+                          <div className="mt-2"><button className="px-3 py-1 rounded border" style={{ borderColor: '#e5dfd2' }} onClick={async () => { try { await window.pywebview?.api?.open_path?.(previewAtt.url); } catch(_){} }}>Apri</button></div>
+                        </div>
+                      </object>
+                    </div>
+                  )}
+                  {previewAtt.kind === 'file' && (
+                    <div className="text-sm" style={{ color: TOKENS.smoke }}>
+                      <p>Impossibile mostrare l'anteprima. Apri con l'app di sistema?</p>
+                      <div className="mt-2"><button className="px-3 py-1 rounded border" style={{ borderColor: '#e5dfd2' }} onClick={async () => { try { await window.pywebview?.api?.open_path?.(previewAtt.url); setPreviewAtt(null); } catch(_){} }}>Apri</button></div>
+                    </div>
+                  )}
+                </div>
+                <div className="flex items-center justify-end gap-2 px-3 pb-3">
+                  <button className="px-2 py-1 rounded border text-xs" style={{ borderColor: '#e5dfd2' }} onClick={async () => {
+                    try {
+                      const src = previewAtt.path || previewAtt.url;
+                      if (!src) return;
+                      const res = await window.pywebview?.api?.save_attachment?.(src, attDisplayName(previewAtt));
+                      if (res && res.ok && res.saved) {
+                        // opzionale: feedback
+                      }
+                    } catch(_) {}
+                  }} title="Scarica">
+                    ⬇ Scarica
+                  </button>
+                </div>
+              </div>
+            </div>
+          ), document.body)}
                 </div>
               </>
             );

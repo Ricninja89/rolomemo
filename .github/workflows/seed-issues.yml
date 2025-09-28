@@ -1,0 +1,30 @@
+name: Seed Issues
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Confermi la creazione/aggiornamento etichette e la creazione delle issue?"
+        required: true
+        default: "yes"
+
+jobs:
+  seed:
+    if: ${{ github.event.inputs.confirm == 'yes' }}
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run Seeder
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          python scripts/seed_issues.py
+

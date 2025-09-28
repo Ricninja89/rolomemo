@@ -12,6 +12,8 @@ import json
 import logging
 import tempfile
 import shutil
+import zipfile
+import mimetypes
 from pathlib import Path
 from typing import Dict, Any, Optional
 
@@ -235,26 +237,56 @@ class DataManager:
             return {"ok": False, "error": str(e)}
     
     def create_backup(self):
-        """Crea un backup delle note esistenti"""
+        """Crea un backup delle note esistenti.
+        - Continua a creare il backup JSON singolo (compatibilità).
+        - In aggiunta crea uno ZIP completo che include notes.json e la cartella attachments/.
+        """
         try:
             backup_dir = DATA_DIR / "backups"
             backup_dir.mkdir(exist_ok=True)
             
             # Mantieni solo gli ultimi N backup
-            backups = sorted(backup_dir.glob("notes_*.json"))
+            backups_json = sorted(backup_dir.glob("notes_*.json"))
+            backups_zip = sorted(backup_dir.glob("backup_*.zip"))
             max_backups = int(self.config.get('app', {}).get('backup_count', DEFAULT_CONFIG['app']['backup_count']))
             
-            if len(backups) >= max_backups:
-                for old_backup in backups[:-max_backups+1]:
-                    old_backup.unlink()
+            if len(backups_json) >= max_backups:
+                for old_backup in backups_json[:-max_backups+1]:
+                    try:
+                        old_backup.unlink()
+                    except Exception:
+                        pass
+            if len(backups_zip) >= max_backups:
+                for old_zip in backups_zip[:-max_backups+1]:
+                    try:
+                        old_zip.unlink()
+                    except Exception:
+                        pass
             
             # Crea nuovo backup con timestamp
             import datetime
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            backup_path = backup_dir / f"notes_{timestamp}.json"
-            shutil.copy2(NOTES_FILE, backup_path)
+            # 1) JSON semplice (compatibilità)
+            backup_json = backup_dir / f"notes_{timestamp}.json"
+            if NOTES_FILE.exists():
+                shutil.copy2(NOTES_FILE, backup_json)
+            # 2) ZIP completo (notes.json + attachments/)
+            backup_zip = backup_dir / f"backup_{timestamp}.zip"
+            with zipfile.ZipFile(backup_zip, 'w', compression=zipfile.ZIP_DEFLATED) as zf:
+                # notes.json
+                if NOTES_FILE.exists():
+                    zf.write(NOTES_FILE, arcname='notes.json')
+                # attachments directory
+                attach_dir = DATA_DIR / 'attachments'
+                if attach_dir.exists() and attach_dir.is_dir():
+                    for root, _, files in os.walk(attach_dir):
+                        root_p = Path(root)
+                        for name in files:
+                            fp = root_p / name
+                            rel = fp.relative_to(DATA_DIR)
+                            zf.write(fp, arcname=str(rel).replace('\\', '/'))
             
-            logger.info(f"Backup creato: {backup_path.name}")
+            logger.info(f"Backup creati: {backup_json.name}{' + ' + backup_zip.name if backup_zip.exists() else ''}")
             
         except Exception as e:
             logger.warning(f"Errore creazione backup: {e}")
@@ -402,6 +434,137 @@ class RoloMemoAPI:
             "notes_file": str(NOTES_FILE),
             "config_file": str(CONFIG_FILE)
         }
+
+    # Utility: apri percorso o URL con l'app di sistema
+    def open_path(self, target: str) -> Dict[str, Any]:
+        try:
+            import webbrowser
+            t = str(target or '').strip()
+            if not t:
+                return {"ok": False, "error": "Percorso/URL vuoto"}
+            low = t.lower()
+            if low.startswith('http://') or low.startswith('https://'):
+                webbrowser.open(t)
+                return {"ok": True}
+            # file:// -> path locale
+            if low.startswith('file://'):
+                from urllib.parse import urlparse, unquote
+                p = urlparse(t)
+                path = unquote(p.path)
+            else:
+                path = t
+            path = str(Path(path))
+            if os.name == 'nt':
+                os.startfile(path)  # type: ignore[attr-defined]
+            elif sys.platform == 'darwin':
+                import subprocess
+                subprocess.Popen(['open', path])
+            else:
+                import subprocess
+                subprocess.Popen(['xdg-open', path])
+            return {"ok": True}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def pick_attachments(self) -> Dict[str, Any]:
+        """Apre un file dialog nativo e ritorna i percorsi selezionati.
+        Ritorna una lista di path assoluti. Nessuna copia viene eseguita qui.
+        """
+        try:
+            import webview as _wv
+            wins = getattr(_wv, 'windows', [])
+            win = wins[0] if wins else None
+            if not win:
+                return {"ok": False, "error": "Nessuna finestra attiva"}
+            files = win.create_file_dialog(_wv.OPEN_DIALOG, allow_multiple=True)
+            # files può essere None o lista di stringhe
+            if not files:
+                return {"ok": True, "files": []}
+            # Normalizza in stringhe
+            out = [str(p) for p in files]
+            return {"ok": True, "files": out}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def copy_attachments(self, note_id: str, files: Any) -> Dict[str, Any]:
+        """Copia una lista di file nel vault degli allegati della nota.
+        Ritorna per ciascun file: name, path assoluto, url file:// e mime.
+        """
+        try:
+            if not note_id or not isinstance(note_id, str):
+                return {"ok": False, "error": "note_id mancante"}
+            arr = files if isinstance(files, (list, tuple)) else []
+            dest_dir = DATA_DIR / 'attachments' / note_id
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            out = []
+            for item in arr:
+                try:
+                    src = Path(str(item))
+                    if not src.exists() or not src.is_file():
+                        continue
+                    base = src.name
+                    safe = base.replace('\\', '_').replace('/', '_')
+                    target = dest_dir / safe
+                    # Evita collisioni aggiungendo suffisso numerico
+                    if target.exists():
+                        stem = target.stem
+                        suffix = target.suffix
+                        k = 2
+                        while True:
+                            cand = dest_dir / f"{stem} ({k}){suffix}"
+                            if not cand.exists():
+                                target = cand
+                                break
+                            k += 1
+                    shutil.copy2(src, target)
+                    mime, _ = mimetypes.guess_type(str(target))
+                    out.append({
+                        'name': target.name,
+                        'path': str(target),
+                        'url': Path(target).as_uri(),
+                        'mime': mime or 'application/octet-stream'
+                    })
+                except Exception as ie:
+                    logging.warning(f"Errore copia allegato {item}: {ie}")
+            return {"ok": True, "items": out}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def save_attachment(self, source_path: str, suggested_name: Optional[str] = None) -> Dict[str, Any]:
+        """Chiede una destinazione e copia il file selezionato.
+        Ritorna il percorso di destinazione se l'utente conferma, altrimenti ok=True e files=[].
+        """
+        try:
+            sp = Path(str(source_path))
+            if not sp.exists():
+                return {"ok": False, "error": "Sorgente inesistente"}
+            import webview as _wv
+            wins = getattr(_wv, 'windows', [])
+            win = wins[0] if wins else None
+            if not win:
+                return {"ok": False, "error": "Nessuna finestra attiva"}
+            default_name = suggested_name or sp.name
+            # pywebview 4/5: SAVE_DIALOG, 6+: FileDialog.SAVE
+            try:
+                dlg_type = _wv.FileDialog.SAVE  # type: ignore[attr-defined]
+            except Exception:
+                dlg_type = _wv.SAVE_DIALOG  # type: ignore[attr-defined]
+            dest = win.create_file_dialog(dlg_type, save_filename=default_name)
+            if not dest:
+                return {"ok": True, "saved": None}
+            # dest può essere str o list
+            if isinstance(dest, (list, tuple)):
+                dest_path = Path(dest[0]) if dest else None
+            else:
+                dest_path = Path(dest)
+            if not dest_path:
+                return {"ok": True, "saved": None}
+            dest_path = dest_path if dest_path.suffix else dest_path.with_name(default_name)
+            dest_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(sp, dest_path)
+            return {"ok": True, "saved": str(dest_path)}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
 
     # Auto-start Windows
     def get_auto_start_status(self) -> Dict[str, Any]:

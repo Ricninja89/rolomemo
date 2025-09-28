@@ -1,0 +1,207 @@
+{
+  "labels": [
+    {"name": "M0", "color": "0e8a16", "description": "Milestone M0 – MVP"},
+    {"name": "M1", "color": "1d76db", "description": "Milestone M1 – Sync & Portabilità"},
+    {"name": "M2", "color": "5319e7", "description": "Milestone M2 – Scrittura"},
+    {"name": "M3", "color": "fbca04", "description": "Milestone M3 – Performance"},
+    {"name": "M4", "color": "e99695", "description": "Milestone M4 – Inking"},
+
+    {"name": "area:UI", "color": "bfdadc", "description": "Interfaccia utente"},
+    {"name": "area:Storage", "color": "c2e0c6", "description": "Storage locale / indice"},
+    {"name": "area:Editor", "color": "fef2c0", "description": "Editor e formattazione"},
+    {"name": "area:Org", "color": "bfe5bf", "description": "Organizzazione (cartelle/tag)"},
+    {"name": "area:Search", "color": "fad8c7", "description": "Ricerca e indice"},
+    {"name": "area:Export", "color": "f9d0c4", "description": "Import/Export"},
+    {"name": "area:DataSafety", "color": "f7c6c7", "description": "Autosave/backup/versioning"},
+    {"name": "area:Installer", "color": "d4c5f9", "description": "Packaging/Installer"},
+    {"name": "area:Sync", "color": "b2f5ea", "description": "Sync provider e conflitti"},
+    {"name": "area:Security", "color": "ffccd7", "description": "Cifratura/chiavi"},
+    {"name": "area:Perf", "color": "f7f7f7", "description": "Performance/Benchmark"},
+    {"name": "area:QA", "color": "ededed", "description": "QA/Validazione"},
+
+    {"name": "type:feature", "color": "0052cc", "description": "Nuova funzionalità"},
+    {"name": "type:infra", "color": "5319e7", "description": "Infrastruttura/Build"},
+    {"name": "type:perf", "color": "fbca04", "description": "Performance"},
+    {"name": "type:qa", "color": "c5def5", "description": "QA/Test"},
+    {"name": "type:policy", "color": "e99695", "description": "Guardrail/Policy"},
+    {"name": "type:release", "color": "0e8a16", "description": "Release"},
+
+    {"name": "priority:P0", "color": "b60205", "description": "Bloccante/critico"},
+    {"name": "priority:P1", "color": "d93f0b", "description": "Alta priorità"},
+    {"name": "priority:P2", "color": "f9d0c4", "description": "Media priorità"},
+    {"name": "status:ready", "color": "0e8a16", "description": "Pronto per sviluppo"},
+    {"name": "status:blocked", "color": "b60205", "description": "Bloccato da dipendenze esterne"}
+  ],
+  "issues": [
+    {
+      "title": "[M0] UI minimale e veloce",
+      "labels": ["M0", "area:UI", "type:feature"],
+      "body": "- [ ] Coerenza grafica: token colore/spacing condivisi; nessun font remoto; verifica dark/light\n- [ ] Performance: latenza input < 50 ms; avvio < 1s; profiling render; evitare reflow costosi; virtualizzare liste >1k\n- [ ] A11y: focus visibile, contrasti AA, scorciatoie base\n- [ ] Test UI: snapshot viste principali; smoke test 3 risoluzioni; zero warning console\n- [ ] Build: asset solo locali in assets/, nessuna CDN; verifica avvio offline"
+    },
+    {
+      "title": "[M0] Storage locale (MD per nota + indice JSON)",
+      "labels": ["M0", "area:Storage", "type:feature"],
+      "body": "- [ ] Front‑matter YAML: title, tags, created, updated, uuid\n- [ ] Scrittura sicura: temp + atomic rename; UTF‑8; path lunghi/unicode\n- [ ] Indice incrementale + file watcher; debounce/dedup; persistenza in %APPDATA%/rolomemo\n- [ ] Test CRUD 10k file; rename/move; crash durante write; consistenza indice\n- [ ] Dipendenze: stdlib (opzionale watchdog con fallback)"
+    },
+    {
+      "title": "[M0] Offline‑first",
+      "labels": ["M0", "area:Storage", "type:feature"],
+      "body": "- [ ] Nessuna rete per avvio/uso base; tutte le funzionalità online dietro flag\n- [ ] Messaggi chiari in modalità offline\n- [ ] Test: disconnesso/modalità aereo; nessun errore in console/log"
+    },
+    {
+      "title": "[M0] Formattazione base editor (MD)",
+      "labels": ["M0", "area:Editor", "type:feature"],
+      "body": "- [ ] Toolbar minimale + scorciatoie (Ctrl+B/I/U, liste, checklist)\n- [ ] Parser/sanificazione: allowlist tag; preview coerente con tema\n- [ ] Test: MD complessi (nidificate, code span, escaping); round‑trip edit/preview\n- [ ] Dipendenze: micro‑parser interno o marked+DOMPurify come asset locali"
+    },
+    {
+      "title": "[M0] Organizzazione (cartelle + tag)",
+      "labels": ["M0", "area:Org", "type:feature"],
+      "body": "- [ ] Cartelle: create/rename/move con impatto su indice; selezione cartella; breadcrumb\n- [ ] Tag: front‑matter; autocompletamento; merge/rename; rimozione\n- [ ] Test: batch 1k note; rename cartella/tag con propagazione"
+    },
+    {
+      "title": "[M0] Ricerca full‑text",
+      "labels": ["M0", "area:Search", "type:feature"],
+      "body": "- [ ] Indice: titolo/corpo/tag; filtri cartella/tag; ranking semplice; highlight\n- [ ] Performance: query < 150 ms su 10k note; indice incrementale; cache query recenti\n- [ ] Test: accuratezza risultati; unicode; simboli; sensibilità caso"
+    },
+    {
+      "title": "[M0] Import/Export (MD/TXT/HTML/PDF)",
+      "labels": ["M0", "area:Export", "type:feature"],
+      "body": "- [ ] Import: parser MD/TXT; mappa front‑matter; assegna UUID; collocazione cartella; report\n- [ ] Export: MD lossless; HTML sanificato; PDF fedele (tool esterno opz.); ZIP tutte le note (MD+media+index.json)\n- [ ] UI wizard: stato/progresso; errori per file problematici\n- [ ] Test: batch 5k; caratteri speciali; immagini; confronto hash"
+    },
+    {
+      "title": "[M0] Sicurezza dati (autosave, versioning, backup)",
+      "labels": ["M0", "area:DataSafety", "type:feature"],
+      "body": "- [ ] Autosave: intervallo configurabile; indicatore stato; throttle su idle\n- [ ] Versioning: snapshot per nota in .versions/; purge policy\n- [ ] Backup: giornaliero cartella note in ZIP; retention; restore\n- [ ] Test: kill process durante edit → ripristino; restore snapshot/backup"
+    },
+    {
+      "title": "[M0] Installer Windows (build, firma, CI)",
+      "labels": ["M0", "area:Installer", "type:infra", "priority:P0", "status:ready"],
+      "body": "- [ ] PyInstaller onefile windowed; asset in assets/\n- [ ] Inno Setup .iss con AppId/AppName/Version; icone e scorciatoie\n- [ ] Firma Authenticode EXE e setup (timestamp); Publisher coerente\n- [ ] GitHub Actions: build, sign, package, release artifact\n- [ ] Test: install/upgrade/uninstall; UAC; SmartScreen; AV comuni"
+    },
+    {
+      "title": "[M0] Inno Setup: creare script .iss",
+      "labels": ["M0", "area:Installer", "type:infra", "priority:P1", "status:ready"],
+      "body": "- [ ] Strutturare `installer/rolomemo.iss` con AppId (GUID), AppName, AppVersion\n- [ ] File inclusi: exe PyInstaller, assets/, icona\n- [ ] Cartelle: Program Files per binari; dati in %APPDATA%/rolomemo\n- [ ] Scorciatoie Desktop/Start, Uninstall entry\n- [ ] Verificare install path con spazio/char speciali"
+    },
+    {
+      "title": "[M0] Firma codice: integrare signtool e timestamp",
+      "labels": ["M0", "area:Installer", "type:infra", "priority:P0", "status:blocked"],
+      "body": "- [ ] Secrets repo: WINDOWS_CERT_PFX_BASE64, WINDOWS_CERT_PASSWORD\n- [ ] Ricostruire PFX e firmare EXE + Setup (SHA256)\n- [ ] Timestamp server (DigiCert/Sectigo)\n- [ ] Verifica firma: `Get-AuthenticodeSignature` su runner e locale\n- [ ] Documentare gestione sicura del certificato"
+    },
+    {
+      "title": "[M0] GitHub Actions: pipeline installer firmato",
+      "labels": ["M0", "area:Installer", "type:infra", "priority:P1", "status:ready"],
+      "body": "- [ ] Runner windows-latest; setup Python; cache pip\n- [ ] Build PyInstaller (onefile, windowed)\n- [ ] Installare Inno Setup (`choco install innosetup`); compilare .iss (`iscc`)\n- [ ] Firma EXE e Setup con signtool; timestamp\n- [ ] Upload artifact e allegare a Release\n- [ ] Matrix opzionale per canali (beta/stable)"
+    },
+    {
+      "title": "[M0] SmartScreen e distribuzione: verifica e documentazione",
+      "labels": ["M0", "area:Installer", "type:qa", "priority:P2", "status:ready"],
+      "body": "- [ ] Verificare comportamento SmartScreen su macchina pulita\n- [ ] Aggiornare README con verifica firma digitale e Publisher\n- [ ] Evitare ZIP portabile; indicare percorso download ufficiale release\n- [ ] Note su reputazione firma (nuovi certificati) e aspettative utente"
+    },
+    {
+      "title": "[M0] Validazione M0 e Documentazione",
+      "labels": ["M0", "area:QA", "type:qa"],
+      "body": "- [ ] Benchmark: avvio <1s; ricerca <150 ms; editing fluido 10k note\n- [ ] Robustezza: blackout/kill → perdita <10s\n- [ ] Export globale ZIP; disinstallazione pulita\n- [ ] Documentazione: guida in‑app (F1); README; changelog"
+    },
+
+    {
+      "title": "[M1] Architettura Sync e provider",
+      "labels": ["M1", "area:Sync", "type:feature"],
+      "body": "- [ ] Interfaccia SyncProvider (pull/push/list/conflicts/resolve)\n- [ ] Provider iniziali: LocalFolder/SMB e WebDAV\n- [ ] Conflitti: LWW + diff assistito; UI confronto; merge opzionale\n- [ ] Coda operazioni; retry con backoff; journaling\n- [ ] Test: 5k note; modifiche concorrenti su 2 macchine; conflitti <3 click"
+    },
+    {
+      "title": "[M1] Wizard Export/Migrazione",
+      "labels": ["M1", "area:Export", "type:feature"],
+      "body": "- [ ] Selettori origine/destinazione (cartella/ZIP); anteprima conteggio; dry‑run\n- [ ] Operazione reversibile con checkpoint; log dettagliati\n- [ ] Test: migrazione avanti/indietro su dataset grande"
+    },
+    {
+      "title": "[M1] Cifratura locale (vault)",
+      "labels": ["M1", "area:Security", "type:feature"],
+      "body": "- [ ] scrypt + AES‑GCM; salt univoco; .keymeta; esclusione dall’indice\n- [ ] UI: crea/attiva/disattiva vault; cambio password; sblocco sessione\n- [ ] Test: corruzione file cifrato → errori chiari; performance accettabili\n- [ ] Dipendenze: cryptography (extra opzionale)"
+    },
+    {
+      "title": "[M1] Validazione M1 e Documentazione",
+      "labels": ["M1", "area:QA", "type:qa"],
+      "body": "- [ ] Sync stabile con interruzioni di rete; ripresa consistente\n- [ ] Export/restore su nuovo PC con path indipendente\n- [ ] Doc: guida ‘Come sincronizzare’ + avvertenze privacy"
+    },
+
+    {
+      "title": "[M2] Backlink / Wiki links",
+      "labels": ["M2", "area:Editor", "type:feature"],
+      "body": "- [ ] Parser [[titolo-o-uuid]] → UUID; aggiornamento su rename\n- [ ] Indice collegamenti entranti; pannello backlink; anteprima hover\n- [ ] Test: rename/merge note; link rotti; loop"
+    },
+    {
+      "title": "[M2] Allegati / Immagini",
+      "labels": ["M2", "area:Editor", "type:feature"],
+      "body": "- [ ] Cartella media/ per nota; drag&drop; rename sicuro; riferimenti relativi\n- [ ] UI: placeholder; thumbnail async; compressione opzionale\n- [ ] Export: includere media e rimappare al restore\n- [ ] Test: file grandi; unicode; duplicati"
+    },
+    {
+      "title": "[M2] Reminder leggeri",
+      "labels": ["M2", "area:Editor", "type:feature"],
+      "body": "- [ ] Notifiche locali OS; snooze; persist in front‑matter\n- [ ] Test: persist/restore; time‑zones; sleep/resume\n- [ ] Dipendenze opzionali: winrt/plyer con fallback"
+    },
+    {
+      "title": "[M2] Template note",
+      "labels": ["M2", "area:Editor", "type:feature"],
+      "body": "- [ ] Galleria template MD con variabili; inserimento rapido; data/ora; contatori\n- [ ] Test: placeholder non risolti; aggiornamento template"
+    },
+    {
+      "title": "[M2] Validazione M2",
+      "labels": ["M2", "area:QA", "type:qa"],
+      "body": "- [ ] Nessuna regressione performance scrittura\n- [ ] Doc ‘Scrivere meglio’ aggiornata"
+    },
+
+    {
+      "title": "[M3] Benchmarking e strumenti",
+      "labels": ["M3", "area:Perf", "type:perf"],
+      "body": "- [ ] Generatore dataset sintetico (50k/5 GB); script benchmark ripetibili\n- [ ] Metriche: avvio, memoria idle, latenza ricerca, FPS scroll; automazione report"
+    },
+    {
+      "title": "[M3] Ottimizzazioni performance",
+      "labels": ["M3", "area:Perf", "type:perf"],
+      "body": "- [ ] Virtualizzazione lista; indice differito; cache su disco; batching IO; lazy‑load media\n- [ ] Profiling CPU/mem; eliminare hot‑spot >5%"
+    },
+    {
+      "title": "[M3] QA carico",
+      "labels": ["M3", "area:QA", "type:qa"],
+      "body": "- [ ] Esecuzione benchmark su CI nightly; pubblicare report\n- [ ] Test: nessun frame‑drop visibile (60fps); RAM idle < 300 MB"
+    },
+    {
+      "title": "[M3] Validazione M3",
+      "labels": ["M3", "area:QA", "type:qa"],
+      "body": "- [ ] Budget rispettati; report pubblico nel repo"
+    },
+
+    {
+      "title": "[M4] Engine inchiostro",
+      "labels": ["M4", "area:Editor", "type:feature"],
+      "body": "- [ ] Canvas paginato; sampling 120 Hz (se supportato); smoothing\n- [ ] Layer separati testo/inchiostro; formato vettoriale + raster cache\n- [ ] Palm rejection; gomma/undo/redo"
+    },
+    {
+      "title": "[M4] Export PDF Inking",
+      "labels": ["M4", "area:Export", "type:feature"],
+      "body": "- [ ] Rendering pagina fedele; margini; no tagli\n- [ ] Test: print‑to‑PDF vs export → identico"
+    },
+    {
+      "title": "[M4] Integrazione inchiostro con note",
+      "labels": ["M4", "area:UI", "type:feature"],
+      "body": "- [ ] Collegare pagine inchiostro a note; anteprima thumbnail; gestione spazio\n- [ ] Test: apertura/chiusura rapida; memoria entro budget"
+    },
+    {
+      "title": "[M4] Validazione M4",
+      "labels": ["M4", "area:QA", "type:qa"],
+      "body": "- [ ] Scrittura fluida; export identico; doc ‘Inking’"
+    },
+
+    {
+      "title": "[Guardrail] Checklist di conformità",
+      "labels": ["type:policy"],
+      "body": "- [ ] Nessun lock‑in; export completo\n- [ ] Offline‑first rispettato\n- [ ] Performance budget rispettato\n- [ ] UI coerente; nessun asset remoto; a11y minimo\n- [ ] Tracking disattivo; opt‑in granulari\n- [ ] Nessuna funzione base dietro paywall"
+    },
+    {
+      "title": "[Release] Checklist generale",
+      "labels": ["type:release"],
+      "body": "- [ ] Test automatici verdi; smoke manuali\n- [ ] Build installer firmato; verifica firma e SmartScreen\n- [ ] Migrazioni dati verificate\n- [ ] Documentazione aggiornata (README, guida, changelog)\n- [ ] Asset offline completi in assets/; nessuna CDN"
+    }
+  ]
+}
