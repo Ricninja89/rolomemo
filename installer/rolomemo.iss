@@ -19,12 +19,14 @@ DisableDirPage=no
 DisableProgramGroupPage=no
 AllowNoIcons=yes
 OutputBaseFilename={#MyAppName}-Setup-v{#MyAppVersion}
-OutputDir=dist\installer
+; Output relative to repo root (script resides in installer/)
+OutputDir=..\dist\installer
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
 ArchitecturesInstallIn64BitMode=x64
-SetupIconFile=assets\icon.ico
+; Optional app icon. Uncomment and ensure path exists
+; SetupIconFile=..\assets\icon.ico
 UninstallDisplayIcon={app}\RoloMemo.exe
 ; Signing handled in CI with signtool after build
 
@@ -37,7 +39,7 @@ Name: "desktopicon"; Description: "Crea un'icona sul Desktop"; GroupDescription:
 
 [Files]
 ; Installa l'eseguibile PyInstaller onefile
-Source: "dist\RoloMemo.exe"; DestDir: "{app}"; DestName: "RoloMemo.exe"; Flags: ignoreversion
+Source: "..\dist\RoloMemo.exe"; DestDir: "{app}"; DestName: "RoloMemo.exe"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\RoloMemo.exe"
