@@ -62,22 +62,26 @@ jobs:
           iscc /DMyAppVersion=$v installer\rolomemo.iss
 
       - name: Prepare signing certificate (optional)
-        if: ${{ secrets.WINDOWS_CERT_PFX_BASE64 && secrets.WINDOWS_CERT_PASSWORD }}
         shell: pwsh
+        env:
+          WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
         run: |
+          if (-not "$env:WINDOWS_CERT_PFX_BASE64") { Write-Host "No signing cert provided, skipping"; exit 0 }
           $pfx = "$PWD\codesign.pfx"
-          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String('${{ secrets.WINDOWS_CERT_PFX_BASE64 }}'))
-          echo "::set-output name=pfx::$pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERT_PFX_BASE64))
+          Write-Host "Wrote signing cert to $pfx"
 
       - name: Sign binaries (optional)
-        if: ${{ secrets.WINDOWS_CERT_PFX_BASE64 && secrets.WINDOWS_CERT_PASSWORD }}
         shell: pwsh
+        env:
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
         run: |
+          if (-not (Test-Path "$PWD\codesign.pfx") -or -not "$env:WINDOWS_CERT_PASSWORD") { Write-Host "No signing material, skipping"; exit 0 }
           $pfx = "$PWD\codesign.pfx"
-          $pwd = '${{ secrets.WINDOWS_CERT_PASSWORD }}'
-          $exe = Get-ChildItem dist\RoloMemo.exe | Select-Object -First 1
+          $pwd = "$env:WINDOWS_CERT_PASSWORD"
+          $exe = Get-ChildItem dist\RoloMemo.exe -ErrorAction SilentlyContinue | Select-Object -First 1
           if ($exe) { signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f $pfx /p $pwd $exe.FullName }
-          $setup = Get-ChildItem dist\installer\*Setup*.exe | Select-Object -First 1
+          $setup = Get-ChildItem dist\installer\*Setup*.exe -ErrorAction SilentlyContinue | Select-Object -First 1
           if ($setup) { signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f $pfx /p $pwd $setup.FullName }
 
       - name: Upload artifacts
@@ -100,4 +104,3 @@ jobs:
             dist/installer/*.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
