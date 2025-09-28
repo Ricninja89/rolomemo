@@ -7,15 +7,14 @@ Powered by https://digitalezen.it
 
 
 Download Veloci
-- Ultima release (zip pronto): [Releases → Latest](https://github.com/Ricninja89/rolomemo/releases/latest)
-- Artifact CI (zip da Actions): [Actions → Windows Build](https://github.com/Ricninja89/rolomemo/actions/workflows/windows-build.yml)
+- Ultima release (portable ZIP): [Releases → Latest](https://github.com/Ricninja89/rolomemo/releases/latest)
 
 
-Scaricare e Usare (Windows)
-- Vai nella sezione “Actions” o “Releases” del repository GitHub e scarica lo zip generato dal workflow:
-  - One‑Dir: contiene `RoloMemo.exe` più cartelle di supporto (consigliato)
-  - One‑File (se presente): un unico `RoloMemo.exe` portabile
-- Scompatta lo zip e avvia `RoloMemo.exe`.
+Scaricare e Usare (Windows — Portable)
+- Scarica da Releases il file `RoloMemo-Portable-vX.Y.Z.zip` e il relativo `.sha256.txt`.
+- Tasto destro sullo ZIP → Proprietà → spunta “Sblocca” → Applica (rimuove il blocco SmartScreen).
+- Estrai lo ZIP in una cartella (es. `C:\Programmi\RoloMemo` o `C:\Apps\RoloMemo`).
+- Avvia `RoloMemo.exe`.
 
 Salvataggi
 - Dati utente: `%APPDATA%/rolomemo/`
@@ -37,9 +36,9 @@ Prerequisiti: Python 3.9+ (testato con 3.13), PowerShell.
 3) Avvia
    - `dist/RoloMemo/RoloMemo.exe`
 
-One-File (opzionale)
-- PowerShell: `$env:ROLOMEMO_ONEFILE='1' ; ./venv/Scripts/python build_installer.py`
-- Output: `dist/RoloMemo.exe`
+Portable ZIP (build locale)
+- PowerShell: `./venv/Scripts/python build_installer.py` (genera One-Dir `dist/RoloMemo/`)
+- Crea ZIP: `Compress-Archive -Path dist/RoloMemo/* -DestinationPath dist/RoloMemo-Portable-vLOCAL.zip`
 
 
 Linux/macOS (nota)

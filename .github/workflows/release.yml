@@ -40,59 +40,43 @@ jobs:
           if (-not $v) { $v = '${{ github.ref_name }}' }
           echo "version=$v" >> $env:GITHUB_OUTPUT
 
-      - name: Build PyInstaller (onefile)
+      - name: Build PyInstaller (portable onedir)
         shell: pwsh
         run: |
-          pyinstaller --name RoloMemo --windowed --noconfirm --clean --onefile `
+          pyinstaller --name RoloMemo --windowed --noconfirm --clean --onedir `
             --collect-submodules webview --collect-data webview `
             --add-data "rolomemo_component.js;." `
             --add-data "assets;assets" `
             rolomemo.py
 
-      - name: Show dist
-        run: dir dist
-
-      - name: Setup Inno Setup
-        run: choco install innosetup -y
-
-      - name: Compile installer (.iss)
+      - name: Zip portable folder
         shell: pwsh
         run: |
           $v = '${{ steps.ver.outputs.version }}'
-          iscc /DMyAppVersion=$v installer\rolomemo.iss
+          $src = "dist/RoloMemo"
+          $zip = "dist/RoloMemo-Portable-v$($v).zip"
+          if (Test-Path $zip) { Remove-Item $zip -Force }
+          Compress-Archive -Path "$src/*" -DestinationPath $zip -Force
+          Write-Host "Created $zip"
 
-      - name: Prepare signing certificate (optional)
+      - name: Compute SHA-256
         shell: pwsh
-        env:
-          WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
         run: |
-          if (-not "$env:WINDOWS_CERT_PFX_BASE64") { Write-Host "No signing cert provided, skipping"; exit 0 }
-          $pfx = "$PWD\codesign.pfx"
-          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERT_PFX_BASE64))
-          Write-Host "Wrote signing cert to $pfx"
+          $v = '${{ steps.ver.outputs.version }}'
+          $zip = "dist/RoloMemo-Portable-v$($v).zip"
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash
+          "$hash  $(Split-Path -Leaf $zip)" | Out-File -FilePath "$zip.sha256.txt" -Encoding ascii
+          Write-Host "SHA256: $hash"
 
-      - name: Sign binaries (optional)
-        shell: pwsh
-        env:
-          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
-        run: |
-          if (-not (Test-Path "$PWD\codesign.pfx") -or -not "$env:WINDOWS_CERT_PASSWORD") { Write-Host "No signing material, skipping"; exit 0 }
-          $pfx = "$PWD\codesign.pfx"
-          $pwd = "$env:WINDOWS_CERT_PASSWORD"
-          $exe = Get-ChildItem dist\RoloMemo.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-          if ($exe) { signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f $pfx /p $pwd $exe.FullName }
-          $setup = Get-ChildItem dist\installer\*Setup*.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-          if ($setup) { signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f $pfx /p $pwd $setup.FullName }
-
-      - name: Upload artifacts
+      - name: Upload artifacts (portable)
         uses: actions/upload-artifact@v4
         with:
-          name: windows-build
+          name: windows-portable
           path: |
-            dist/RoloMemo.exe
-            dist/installer/*.exe
+            dist/RoloMemo-Portable-v*.zip
+            dist/RoloMemo-Portable-v*.zip.sha256.txt
 
-      - name: Create Release
+      - name: Create Release (portable)
         uses: softprops/action-gh-release@v2
         with:
           name: RoloMemo ${{ steps.ver.outputs.version }}
@@ -100,7 +84,7 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            dist/RoloMemo.exe
-            dist/installer/*.exe
+            dist/RoloMemo-Portable-v*.zip
+            dist/RoloMemo-Portable-v*.zip.sha256.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
